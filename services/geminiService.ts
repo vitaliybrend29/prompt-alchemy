@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { UploadedImage, GenerationMode } from "../types";
 
@@ -81,7 +82,12 @@ export const generatePrompts = async (
       }
     });
 
-    const parsed: GeminiResponse = JSON.parse(response.text);
+    const responseText = response.text;
+    if (!responseText) {
+      throw new Error("Model returned an empty response.");
+    }
+
+    const parsed: GeminiResponse = JSON.parse(responseText);
     const finalPrompts: { text: string; referenceImage?: string }[] = [];
 
     parsed.results.forEach(res => {
