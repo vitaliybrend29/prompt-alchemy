@@ -1,0 +1,7 @@
+{
+  "name": "Prompt Alchemy",
+  "description": "A sophisticated AI tool that reverse-engineers image prompts and synthesizes styles. Upload a reference photo to extract its aesthetic, or blend it with a subject photo to create new, personalized generation prompts.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
