@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 import ImageUploader from './components/ImageUploader';
 import { UploadedImage, LoadingState, GenerationMode, PromptGroup, GeneratedPrompt } from './types';
 import { generatePrompts } from './services/geminiService';
@@ -265,6 +266,7 @@ const App: React.FC = () => {
           ))}
         </div>
       </main>
+      <SpeedInsights />
     </div>
   );
 };
