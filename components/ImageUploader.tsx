@@ -26,27 +26,58 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isFull = images.length >= maxCount;
 
-  const processFile = (file: File): Promise<UploadedImage> => {
+  const resizeImage = (file: File, maxWidth = 1024): Promise<{base64: string, mimeType: string}> => {
     return new Promise((resolve) => {
       const reader = new FileReader();
-      reader.onloadend = () => {
-        resolve({
-          id: Math.random().toString(36).substr(2, 9),
-          file,
-          previewUrl: URL.createObjectURL(file),
-          base64: reader.result as string,
-          mimeType: file.type,
-        });
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+
+          if (width > height) {
+            if (width > maxWidth) {
+              height *= maxWidth / width;
+              width = maxWidth;
+            }
+          } else {
+            if (height > maxWidth) {
+              width *= maxWidth / height;
+              height = maxWidth;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, width, height);
+          resolve({
+            base64: canvas.toDataURL('image/jpeg', 0.8),
+            mimeType: 'image/jpeg'
+          });
+        };
+        img.src = e.target?.result as string;
       };
       reader.readAsDataURL(file);
     });
+  };
+
+  const processFile = async (file: File): Promise<UploadedImage> => {
+    const resized = await resizeImage(file);
+    return {
+      id: Math.random().toString(36).substr(2, 9),
+      file,
+      previewUrl: URL.createObjectURL(file),
+      base64: resized.base64,
+      mimeType: resized.mimeType,
+    };
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
     
-    // Calculate how many more we can take
     const remainingSlots = maxCount - images.length;
     const filesToProcess = files.slice(0, remainingSlots);
     
@@ -84,7 +115,6 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({
       </div>
       
       <div className="space-y-3">
-        {/* Upload Area */}
         <div 
           onClick={() => !isFull && fileInputRef.current?.click()}
           onDragOver={(e) => e.preventDefault()}
@@ -114,7 +144,6 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({
           </p>
         </div>
 
-        {/* Thumbnail Grid */}
         {images.length > 0 && (
           <div className="grid grid-cols-4 gap-2">
             {images.map((img) => (
