@@ -20,32 +20,42 @@ export const generatePrompts = async (
 ): Promise<{ text: string; referenceImage?: string }[]> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  let systemInstruction = `You are an expert prompt engineer for high-end AI image generators (Midjourney, Stable Diffusion). 
-  CRITICAL: Maintain subject consistency based on the provided photos. 
-  DO NOT use words like "the person in the photo". Describe their features (hair color, face shape, eyes) directly as part of the prompt.
-  Return a JSON object: { "results": [ { "imageIndex": number, "prompts": ["string", ...] }, ... ] }`;
+  let systemInstruction = `You are a world-class prompt engineer for Midjourney and Stable Diffusion. 
+  Your task is to create standalone, high-fidelity image prompts.
+  
+  CRITICAL RULES:
+  1. NEVER use phrases like "the person in the photo", "Image A", "Reference B", "from the first image", or "style of the second photo".
+  2. Describe the subject's physical traits (hair color, eye shape, facial structure, clothing) as if they are a real person you are seeing right now.
+  3. Seamlessly blend the subject and the environment/style into a single cohesive vision. 
+  4. The output must be a direct description of a visual scene, ready to be pasted into an AI generator.
+  5. Language: English.`;
 
   const parts: any[] = [];
   
   if (mode === GenerationMode.CUSTOM_SCENE && subjectImages.length > 0 && customText) {
     parts.push({ text: `
-      I have provided subject images. 
-      Generate ${count} prompts for EACH subject that places them in this specific scene: "${customText}".
-      Describe the person's identity from the photos and integrate them into the scene naturally.
+      Analyze the physical identity of the person in the provided photos. 
+      Generate ${count} prompts that place this specific person into the following scene: "${customText}".
+      Describe their face and features naturally within the scene description.
+      Return a JSON object: { "results": [ { "imageIndex": 0, "prompts": ["string", ...] } ] }
     ` });
     subjectImages.forEach(img => parts.push({ inlineData: { mimeType: img.mimeType, data: cleanBase64(img.base64) } }));
   }
   else if (mode === GenerationMode.RANDOM_CREATIVE && subjectImages.length > 0) {
     parts.push({ text: `
-      Generate ${count} DISTINCT high-end editorial/fashion prompts for EACH subject image provided.
-      Varied outfits and luxury settings. Maintain facial identity.
+      Analyze the person in the photos. 
+      Generate ${count} high-end editorial/fashion prompts for this subject in varied premium settings.
+      Integrate their physical features directly into the prompts.
+      Return a JSON object: { "results": [ { "imageIndex": 0, "prompts": ["string", ...] } ] }
     ` });
     subjectImages.forEach(img => parts.push({ inlineData: { mimeType: img.mimeType, data: cleanBase64(img.base64) } }));
   } 
   else if (styleImages.length > 0) {
     parts.push({ text: `
-      For EACH style image, generate ${count} prompts ${subjectImages.length > 0 ? 'featuring the provided subject' : 'with a fitting subject'} 
-      that replicate the EXACT aesthetic, lighting, and medium of the style reference.
+      I have provided style references and subject references.
+      Generate ${count} prompts featuring the subject with the EXACT aesthetic, lighting, and medium of the style reference.
+      DO NOT refer to the images by name. Describe the person and the style as one unified masterpiece.
+      Return a JSON object: { "results": [ { "imageIndex": 0, "prompts": ["string", ...] } ] }
     ` });
     styleImages.forEach(img => parts.push({ inlineData: { mimeType: img.mimeType, data: cleanBase64(img.base64) } }));
     if (subjectImages.length > 0) {
