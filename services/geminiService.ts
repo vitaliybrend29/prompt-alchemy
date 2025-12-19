@@ -6,7 +6,7 @@ const cleanBase64 = (b64: string) => b64.split(',')[1] || b64;
 
 export interface GeminiResponse {
   results: {
-    imageIndex: number;
+    imageIndex: number; // Index within the style category (or subject if only subjects present)
     prompts: string[];
   }[];
 }
@@ -23,41 +23,53 @@ export const generatePrompts = async (
   let systemInstruction = `You are an expert Midjourney Prompt Engineer.
   TASK: Generate detailed, standalone visual prompts in English.
   
-  RULES:
-  1. DO NOT mention "Image A", "Subject", "Reference", or "the photo".
-  2. Describe physical features (e.g., "a man with sharp cheekbones and messy dark hair") instead of saying "the person in the photo".
+  CORE MISSION:
+  - If a SUBJECT is provided, strictly analyze their physical traits (face shape, hair style/color, eyes, distinguishing marks) and describe them physically in the prompt.
+  - If a STYLE is provided, borrow the lighting, medium (photo, digital art, oil painting), composition, and color palette.
+  - DO NOT swap roles: don't use the subject's face for the environment, and don't use the style's face for the subject.
+  
+  STRICT RULES:
+  1. NEVER mention "Image", "Reference", "Subject", "A/B", or "the photo".
+  2. Describe everything as if you are looking at a real scene.
   3. Merge subject and style into one unified cinematic description.
   4. Output MUST be valid JSON.`;
 
   const parts: any[] = [];
   
   if (mode === GenerationMode.CUSTOM_SCENE && subjectImages.length > 0 && customText) {
+    parts.push({ text: `SUBJECT REFERENCES (the person to describe):` });
+    subjectImages.forEach(img => parts.push({ inlineData: { mimeType: img.mimeType, data: cleanBase64(img.base64) } }));
+    
     parts.push({ text: `
-      Analyze the person in the photos. 
-      Generate ${count} prompts for each subject putting them in this scene: "${customText}".
-      Describe their face and features naturally.
+      SCENE DESCRIPTION: "${customText}".
+      Generate ${count} prompts for the person provided above, placing them in this scene.
       Return JSON: { "results": [ { "imageIndex": 0, "prompts": ["...", "..."] } ] }
     ` });
-    subjectImages.forEach(img => parts.push({ inlineData: { mimeType: img.mimeType, data: cleanBase64(img.base64) } }));
   }
   else if (mode === GenerationMode.RANDOM_CREATIVE && subjectImages.length > 0) {
+    parts.push({ text: `SUBJECT REFERENCES (the person to describe):` });
+    subjectImages.forEach(img => parts.push({ inlineData: { mimeType: img.mimeType, data: cleanBase64(img.base64) } }));
+    
     parts.push({ text: `
-      Analyze the person in the photos. 
-      Generate ${count} unique high-end editorial prompts for this person.
+      Generate ${count} creative, high-end editorial prompts for the person provided above.
       Return JSON: { "results": [ { "imageIndex": 0, "prompts": ["...", "..."] } ] }
     ` });
-    subjectImages.forEach(img => parts.push({ inlineData: { mimeType: img.mimeType, data: cleanBase64(img.base64) } }));
   } 
   else if (styleImages.length > 0) {
-    parts.push({ text: `
-      I have provided style images and subject images.
-      Generate ${count} prompts where the subject's identity is merged with the style aesthetics.
-      Return JSON: { "results": [ { "imageIndex": 0, "prompts": ["...", "..."] } ] }
-    ` });
+    parts.push({ text: `STYLE REFERENCES (borrow the lighting, colors, and art style from these):` });
     styleImages.forEach(img => parts.push({ inlineData: { mimeType: img.mimeType, data: cleanBase64(img.base64) } }));
+    
     if (subjectImages.length > 0) {
+      parts.push({ text: `SUBJECT/FACE REFERENCES (describe this person physically in the scene):` });
       subjectImages.forEach(img => parts.push({ inlineData: { mimeType: img.mimeType, data: cleanBase64(img.base64) } }));
     }
+
+    parts.push({ text: `
+      Generate ${count} prompts where the SUBJECT's identity is placed into the STYLE's environment.
+      If multiple styles provided, you can mix them or pick the best one.
+      Return JSON: { "results": [ { "imageIndex": 0, "prompts": ["...", "..."] } ] }
+      (imageIndex should refer to which STYLE image best matches the resulting prompt).
+    ` });
   } else {
     throw new Error("Missing images.");
   }
@@ -98,13 +110,14 @@ export const generatePrompts = async (
     if (!parsed.results || !Array.isArray(parsed.results)) return [];
 
     parsed.results.forEach(res => {
-      // Safe index access
       const index = typeof res.imageIndex === 'number' ? res.imageIndex : 0;
       
       let refImg: string | undefined;
       if (mode === GenerationMode.RANDOM_CREATIVE || mode === GenerationMode.CUSTOM_SCENE) {
+        // In these modes, we only have subjects, so imageIndex refers to subjectImages
         refImg = subjectImages[index]?.base64 || subjectImages[0]?.base64;
       } else {
+        // In MATCH_STYLE mode, imageIndex refers to styleImages
         refImg = styleImages[index]?.base64 || styleImages[0]?.base64;
       }
 
