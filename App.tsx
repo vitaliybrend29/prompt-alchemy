@@ -3,12 +3,11 @@ import React, { useState, useEffect } from 'react';
 import ImageUploader from './components/ImageUploader';
 import { UploadedImage, LoadingState, GenerationMode, PromptGroup, GeneratedPrompt } from './types';
 import { generatePrompts } from './services/geminiService';
-import { WandIcon, CopyIcon, SparklesIcon, ImageIcon, UserIcon, TrashIcon } from './components/Icons';
+import { WandIcon, CopyIcon, SparklesIcon, ImageIcon, UserIcon, TrashIcon, TelegramIcon } from './components/Icons';
 
 const MAX_IMAGES_PER_CATEGORY = 5;
 const MAX_HISTORY_ITEMS = 10;
 
-// Helper to resize base64 images for history thumbnails to save memory
 const createThumbnail = (base64: string, maxWidth = 200): Promise<string> => {
   return new Promise((resolve) => {
     const img = new Image();
@@ -19,7 +18,7 @@ const createThumbnail = (base64: string, maxWidth = 200): Promise<string> => {
       canvas.height = maxWidth / ratio;
       const ctx = canvas.getContext('2d');
       ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
-      resolve(canvas.toDataURL('image/jpeg', 0.7)); // Compressing to JPEG
+      resolve(canvas.toDataURL('image/jpeg', 0.7));
     };
     img.src = base64;
   });
@@ -33,6 +32,7 @@ const App: React.FC = () => {
   const [history, setHistory] = useState<PromptGroup[]>([]);
   const [loadingState, setLoadingState] = useState<LoadingState>(LoadingState.IDLE);
   const [error, setError] = useState<string | null>(null);
+  const [showBotInfo, setShowBotInfo] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem('prompt_alchemy_v3_compact');
@@ -40,7 +40,6 @@ const App: React.FC = () => {
       try {
         setHistory(JSON.parse(saved));
       } catch (e) {
-        console.error("Failed to load history", e);
         localStorage.removeItem('prompt_alchemy_v3_compact');
       }
     }
@@ -50,10 +49,7 @@ const App: React.FC = () => {
     try {
       const historyToSave = history.slice(0, MAX_HISTORY_ITEMS);
       localStorage.setItem('prompt_alchemy_v3_compact', JSON.stringify(historyToSave));
-    } catch (e) {
-      console.warn("LocalStorage full, trimming history further");
-      setHistory(prev => prev.slice(0, 3)); // Aggressively trim on failure
-    }
+    } catch (e) {}
   }, [history]);
 
   const handleGenerate = async () => {
@@ -73,7 +69,6 @@ const App: React.FC = () => {
       const mode = isRandomMode ? GenerationMode.RANDOM_CREATIVE : GenerationMode.MATCH_STYLE;
       const results = await generatePrompts(styleImages, subjectImages, promptCount, mode);
 
-      // Create thumbnails for history to prevent memory issues
       const promptsWithThumbnails: GeneratedPrompt[] = await Promise.all(
         results.map(async (p) => ({
           text: p.text,
@@ -85,25 +80,17 @@ const App: React.FC = () => {
         id: Date.now().toString(),
         timestamp: Date.now(),
         prompts: promptsWithThumbnails,
-        styleReferences: [], // Don't store full res in history to save space
+        styleReferences: [],
         subjectReferences: [],
         mode
       };
 
-      setHistory(prev => {
-        const updated = [newGroup, ...prev];
-        return updated.slice(0, MAX_HISTORY_ITEMS);
-      });
-      
+      setHistory(prev => [newGroup, ...prev].slice(0, MAX_HISTORY_ITEMS));
       setLoadingState(LoadingState.IDLE);
     } catch (err: any) {
       setError(err.message || "Something went wrong.");
       setLoadingState(LoadingState.ERROR);
     }
-  };
-
-  const deleteHistoryItem = (id: string) => {
-    setHistory(prev => prev.filter(item => item.id !== id));
   };
 
   const copyToClipboard = (text: string) => {
@@ -120,14 +107,22 @@ const App: React.FC = () => {
             </div>
             <h1 className="text-xl font-bold text-white tracking-tight">Prompt Alchemy</h1>
           </div>
-          {history.length > 0 && (
+          <div className="flex items-center gap-4">
             <button 
-              onClick={() => { if(confirm('Clear history?')) setHistory([]); }} 
-              className="text-xs text-slate-500 hover:text-red-400 flex items-center gap-1 transition-colors"
+              onClick={() => setShowBotInfo(!showBotInfo)}
+              className="flex items-center gap-2 text-xs font-medium text-slate-400 hover:text-indigo-400 transition-colors"
             >
-              <TrashIcon className="w-3 h-3" /> Clear History
+              <TelegramIcon className="w-4 h-4" /> Bot Setup
             </button>
-          )}
+            {history.length > 0 && (
+              <button 
+                onClick={() => { if(confirm('Clear history?')) setHistory([]); }} 
+                className="text-xs text-slate-500 hover:text-red-400 flex items-center gap-1 transition-colors"
+              >
+                <TrashIcon className="w-3 h-3" /> Clear History
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
@@ -135,6 +130,23 @@ const App: React.FC = () => {
         
         {/* INPUT PANEL */}
         <div className="lg:col-span-4 space-y-6">
+          {showBotInfo && (
+            <div className="bg-indigo-500/10 border border-indigo-500/30 rounded-2xl p-5 animate-in fade-in slide-in-from-top-4">
+              <div className="flex items-center gap-2 mb-3 text-indigo-400">
+                <TelegramIcon className="w-5 h-5" />
+                <h3 className="font-bold text-sm">Telegram Bot Alchemy</h3>
+              </div>
+              <p className="text-xs text-slate-400 leading-relaxed mb-4">
+                Вы можете использовать функции этого сайта прямо в Telegram. Просто отправьте фото боту.
+              </p>
+              <ol className="text-[11px] space-y-2 text-slate-500 list-decimal list-inside">
+                <li>Создайте бота в <a href="https://t.me/BotFather" target="_blank" className="text-indigo-400 underline">@BotFather</a></li>
+                <li>Добавьте <code className="bg-slate-800 px-1 rounded text-slate-300">TELEGRAM_BOT_TOKEN</code> в Vercel</li>
+                <li>Настройте Webhook (см. документацию)</li>
+              </ol>
+            </div>
+          )}
+
           <div className="bg-surface rounded-2xl p-5 border border-slate-700/50 shadow-2xl sticky top-24">
             <div className="space-y-6">
               <ImageUploader 
@@ -159,31 +171,15 @@ const App: React.FC = () => {
 
               <div className="space-y-4 pt-4 border-t border-slate-700/50">
                 <div className="flex bg-slate-900/50 p-1 rounded-xl border border-slate-700">
-                  <button
-                    onClick={() => setIsRandomMode(false)}
-                    className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all ${!isRandomMode ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500'}`}
-                  >
-                    Match Style
-                  </button>
-                  <button
-                    onClick={() => setIsRandomMode(true)}
-                    className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all ${isRandomMode ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-sm' : 'text-slate-500'}`}
-                  >
-                    Random Creative
-                  </button>
+                  <button onClick={() => setIsRandomMode(false)} className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all ${!isRandomMode ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500'}`}>Match Style</button>
+                  <button onClick={() => setIsRandomMode(true)} className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all ${isRandomMode ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-sm' : 'text-slate-500'}`}>Random Creative</button>
                 </div>
 
                 <div className="flex flex-col gap-1">
                   <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider ml-1">Prompts per image</span>
                   <div className="grid grid-cols-4 gap-2">
                     {[1, 2, 3, 5].map(n => (
-                      <button
-                        key={n}
-                        onClick={() => setPromptCount(n)}
-                        className={`py-1.5 rounded-lg text-xs font-bold border transition-all ${promptCount === n ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-500'}`}
-                      >
-                        {n}
-                      </button>
+                      <button key={n} onClick={() => setPromptCount(n)} className={`py-1.5 rounded-lg text-xs font-bold border transition-all ${promptCount === n ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-500'}`}>{n}</button>
                     ))}
                   </div>
                 </div>
@@ -216,7 +212,6 @@ const App: React.FC = () => {
 
           {history.map((group) => (
             <div key={group.id} className="bg-surface/50 rounded-2xl border border-slate-800 overflow-hidden shadow-xl animate-in fade-in slide-in-from-bottom-4 duration-500">
-              {/* Header */}
               <div className="bg-slate-800/50 px-5 py-3 border-b border-slate-700/50 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="p-1.5 rounded-lg bg-slate-700/50">
@@ -226,16 +221,11 @@ const App: React.FC = () => {
                     {new Date(group.timestamp).toLocaleTimeString()} • {group.mode.replace('_', ' ')} • {group.prompts.length} Prompts
                   </div>
                 </div>
-                <button onClick={() => deleteHistoryItem(group.id)} className="text-slate-500 hover:text-red-400 p-1.5 transition-colors">
-                  <TrashIcon className="w-4 h-4" />
-                </button>
               </div>
 
-              {/* Prompts List */}
               <div className="p-5 space-y-6">
                 {group.prompts.map((prompt, idx) => (
                   <div key={idx} className="flex gap-4 group">
-                    {/* Reference Thumbnail (Already Compressed) */}
                     {prompt.referenceImage && (
                       <div className="flex-shrink-0 w-20 h-20 rounded-lg overflow-hidden border border-slate-700 shadow-md bg-slate-800">
                         <img src={prompt.referenceImage} alt="Ref" className="w-full h-full object-cover" />
@@ -244,19 +234,12 @@ const App: React.FC = () => {
                     
                     <div className="flex-grow bg-slate-900/40 rounded-xl p-4 border border-slate-700/30 hover:border-indigo-500/30 transition-all relative">
                       <div className="flex justify-between items-start gap-3 mb-2">
-                        <span className="text-[9px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded font-bold uppercase tracking-tighter">
-                          Source Ref
-                        </span>
-                        <button 
-                          onClick={() => copyToClipboard(prompt.text)}
-                          className="text-slate-500 hover:text-white p-1 bg-slate-800 rounded opacity-0 group-hover:opacity-100 transition-opacity"
-                        >
+                        <span className="text-[9px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded font-bold uppercase tracking-tighter">AI Output</span>
+                        <button onClick={() => copyToClipboard(prompt.text)} className="text-slate-500 hover:text-white p-1 bg-slate-800 rounded opacity-0 group-hover:opacity-100 transition-opacity">
                           <CopyIcon className="w-3.5 h-3.5" />
                         </button>
                       </div>
-                      <p className="text-sm text-slate-300 leading-relaxed font-mono select-all">
-                        {prompt.text}
-                      </p>
+                      <p className="text-sm text-slate-300 leading-relaxed font-mono select-all">{prompt.text}</p>
                     </div>
                   </div>
                 ))}
