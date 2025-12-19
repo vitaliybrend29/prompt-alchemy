@@ -3,7 +3,6 @@ import { GoogleGenAI, Type } from "@google/genai";
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 
-// Helper for base64 encoding
 function encode(bytes: Uint8Array) {
   let binary = '';
   const len = bytes.byteLength;
@@ -13,147 +12,181 @@ function encode(bytes: Uint8Array) {
   return btoa(binary);
 }
 
-// Interface for callback state
-// Schema: cmd:subjectId:styleId:count
-type BotState = {
-  cmd: string;
-  sub?: string;
-  sty?: string;
-  cnt: number;
-};
-
 export default async function handler(req: any, res: any) {
-  if (req.method !== 'POST') return res.status(200).send('Bot is running');
+  // Ensure we only process POST requests from Telegram
+  if (req.method !== 'POST') return res.status(200).send('Bot is active');
 
   const { message, callback_query } = req.body;
 
-  // Handle Callback Queries (Wizard Logic)
-  if (callback_query) {
-    const chatId = callback_query.message.chat.id;
-    const messageId = callback_query.message.message_id;
-    const data = callback_query.data;
-    
-    // Parse state: cmd|sub|sty|cnt
-    const [cmd, sub, sty, cntStr] = data.split('|');
-    const cnt = parseInt(cntStr || '3');
+  try {
+    // 1. HANDLE BUTTON CLICKS
+    if (callback_query) {
+      const chatId = callback_query.message.chat.id;
+      const messageId = callback_query.message.message_id;
+      const data = callback_query.data; // format: "cmd|type|count"
 
-    if (cmd === 'set_sub') {
-      await answerCallback(callback_query.id, "🧬 Лицо выбрано!");
-      await showConfigMenu(chatId, messageId, sub, sty, cnt, "Это лицо. Добавьте стиль или начните.");
-    } 
-    else if (cmd === 'set_sty') {
-      await answerCallback(callback_query.id, "🎨 Стиль выбран!");
-      await showConfigMenu(chatId, messageId, sub, sty, cnt, "Это стиль. Добавьте лицо или начните.");
-    } 
-    else if (cmd === 'add_more') {
-      await answerCallback(callback_query.id, "Пришлите второе фото!");
-      await editMessageText(chatId, messageId, `📸 Отлично! Теперь просто отправьте второе фото (оно будет ${sub ? 'Стилем' : 'Лицом'}).`);
-    }
-    else if (cmd === 'toggle_cnt') {
-      const nextCnt = cnt === 1 ? 3 : cnt === 3 ? 5 : 1;
-      await showConfigMenu(chatId, messageId, sub, sty, nextCnt, "Количество промтов изменено.");
-    }
-    else if (cmd === 'run') {
-      await answerCallback(callback_query.id, "🔮 Алхимия начинается...");
-      await editMessageText(chatId, messageId, "🔮 Магия в процессе... Генерирую промты (15-20 сек).");
+      const [cmd, type, countStr] = data.split('|');
+      const count = parseInt(countStr || '3');
 
-      try {
-        const prompts = await processAlchemy(sub, sty, cnt);
-        const results = prompts.join("\n\n---\n\n");
-        const header = `🧪 **Результат Алхимии**\n${sub ? '🧬 Лицо есть' : ''} ${sty ? '🎨 Стиль есть' : ''}\nПромтов: ${cnt}\n\n`;
-        await sendTelegramMessage(chatId, header + results);
-      } catch (e) {
-        console.error(e);
-        await sendTelegramMessage(chatId, "❌ Ошибка при генерации. Возможно, фото слишком сложное или API перегружен.");
+      // Check if the message actually has photos (our menu is attached to a photo)
+      const photo = callback_query.message.photo;
+      const repliedPhoto = callback_query.message.reply_to_message?.photo;
+
+      if (cmd === 'toggle_type') {
+        const nextType = type === 'face' ? 'style' : 'face';
+        await updateMenu(chatId, messageId, nextType, count);
+        return res.status(200).send('ok');
+      }
+
+      if (cmd === 'toggle_count') {
+        const nextCount = count === 1 ? 3 : count === 3 ? 5 : 1;
+        await updateMenu(chatId, messageId, type, nextCount);
+        return res.status(200).send('ok');
+      }
+
+      if (cmd === 'run') {
+        await answerCallback(callback_query.id, "🪄 Начинаю алхимию...");
+        await sendTelegramMessage(chatId, "⏳ Генерирую промты... Пожалуйста, подождите 10-20 секунд.");
+
+        const mainPhotoId = photo[photo.length - 1].file_id;
+        let secondaryPhotoId = repliedPhoto ? repliedPhoto[repliedPhoto.length - 1].file_id : null;
+
+        // If we have both, image 1 is Subject, image 2 is Style
+        // If only one, use selected type
+        const prompts = await performAlchemy(mainPhotoId, secondaryPhotoId, type, count);
+        
+        const resultText = `✅ **Готово!**\n\n` + prompts.join("\n\n---\n\n");
+        await sendTelegramMessage(chatId, resultText);
+        return res.status(200).send('ok');
       }
     }
 
-    return res.status(200).send('ok');
-  }
+    // 2. HANDLE NEW MESSAGES
+    if (message) {
+      const chatId = message.chat.id;
 
-  // Handle Incoming Messages
-  if (!message) return res.status(200).send('ok');
-  const chatId = message.chat.id;
-
-  if (message.photo) {
-    const photo = message.photo[message.photo.length - 1];
-    await sendInitialMenu(chatId, photo.file_id);
-  } else if (message.text === "/start") {
-    await sendTelegramMessage(chatId, "👋 Привет! Я **Prompt Alchemy Bot**.\n\nЯ умею создавать профессиональные промты на основе твоих фото.\n\n**Как это работает:**\n1. Отправь мне фото.\n2. Выбери, это **Лицо** (Subject) или **Стиль** (Style).\n3. Можно добавить второе фото для смешивания!\n4. Нажми 'Генерировать'.");
-  } else {
-    await sendTelegramMessage(chatId, "📸 Чтобы начать, просто отправь мне **фотографию**.");
+      if (message.photo) {
+        const photo = message.photo[message.photo.length - 1];
+        
+        // If this photo is a REPLY to another photo message, we can offer to MIX them
+        if (message.reply_to_message?.photo) {
+          // Pass the reply message ID explicitly to solve scoping issues with req
+          await sendMixMenu(chatId, photo.file_id, message.reply_to_message.message_id);
+        } else {
+          await sendSingleMenu(chatId, photo.file_id);
+        }
+      } 
+      else if (message.text === "/start") {
+        await sendTelegramMessage(chatId, "👋 Привет! Я **Prompt Alchemy Bot**.\n\n**Как пользоваться:**\n1. Отправь фото и выбери тип (Лицо или Стиль).\n2. Чтобы **смешать два фото**, отправь второе фото **ОТВЕТОМ** (Reply) на сообщение с первым фото.\n3. Выбери количество промтов и жми 'Пуск'!");
+      } 
+      else {
+        await sendTelegramMessage(chatId, "📸 Пожалуйста, отправь **фотографию**, чтобы начать.");
+      }
+    }
+  } catch (error: any) {
+    console.error("Bot Handler Error:", error);
+    // Silent fail for Telegram or send user notification
+    const chatId = message?.chat?.id || callback_query?.message?.chat?.id;
+    if (chatId) await sendTelegramMessage(chatId, "❌ Произошла ошибка. Убедитесь, что фото не слишком большое.");
   }
 
   return res.status(200).send('ok');
 }
 
-async function sendInitialMenu(chatId: number, fileId: string) {
+// UI HELPERS
+async function sendSingleMenu(chatId: number, fileId: string) {
   const keyboard = {
     inline_keyboard: [
       [
-        { text: "🧬 Это Лицо (Subject)", callback_data: `set_sub|${fileId}||3` },
-        { text: "🎨 Это Стиль (Style)", callback_data: `set_sty||${fileId}|3` }
-      ]
+        { text: "🧬 Это Лицо (Subject)", callback_data: `toggle_type|face|3` },
+        { text: "🔢 Промтов: 3", callback_data: `toggle_count|face|3` }
+      ],
+      [{ text: "🚀 Генерировать!", callback_data: `run|face|3` }],
+      [{ text: "💡 Совет: ответь на это фото другим, чтобы смешать их", callback_data: "none" }]
     ]
   };
 
-  await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
+  await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendPhoto`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       chat_id: chatId,
-      text: "📸 Фото получено! Что это?",
+      photo: fileId,
+      caption: "🖼 Фото получено! Выберите режим:",
       reply_markup: keyboard
     })
   });
 }
 
-async function showConfigMenu(chatId: number, messageId: number, sub: string, sty: string, cnt: number, text: string) {
+// Fixed signature to accept replyToMessageId parameter
+async function sendMixMenu(chatId: number, fileId: string, replyToMessageId: number) {
   const keyboard = {
     inline_keyboard: [
       [
-        { text: `🔢 Промтов: ${cnt}`, callback_data: `toggle_cnt|${sub || ''}|${sty || ''}|${cnt}` }
-      ],
-      (!sub || !sty) ? [{ text: `➕ Добавить ${sub ? 'Стиль' : 'Лицо'}`, callback_data: `add_more|${sub || ''}|${sty || ''}|${cnt}` }] : [],
-      [{ text: "🚀 Генерировать Алхимию!", callback_data: `run|${sub || ''}|${sty || ''}|${cnt}` }]
-    ].filter(r => r.length > 0)
+        { text: "🔢 Промтов: 3", callback_data: `toggle_count|mix|3` },
+        { text: "🚀 Смешать (Алхимия)!", callback_data: `run|mix|3` }
+      ]
+    ]
   };
 
-  await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/editMessageText`, {
+  await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendPhoto`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: chatId,
+      photo: fileId,
+      caption: "🧪 Обнаружено два фото! Я могу смешать это фото (как Стиль) с предыдущим (как Лицо).",
+      reply_markup: keyboard,
+      reply_to_message_id: replyToMessageId
+    })
+  });
+}
+
+async function updateMenu(chatId: number, messageId: number, type: string, count: number) {
+  const typeLabel = type === 'face' ? "🧬 Лицо (Subject)" : type === 'style' ? "🎨 Стиль (Style)" : "🧪 Алхимия (Смешивание)";
+  const keyboard = {
+    inline_keyboard: [
+      [
+        { text: typeLabel, callback_data: `toggle_type|${type}|${count}` },
+        { text: `🔢 Промтов: ${count}`, callback_data: `toggle_count|${type}|${count}` }
+      ],
+      [{ text: "🚀 Запустить генерацию!", callback_data: `run|${type}|${count}` }]
+    ]
+  };
+
+  await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/editMessageReplyMarkup`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       chat_id: chatId,
       message_id: messageId,
-      text: `${text}\n\n**Текущий конфиг:**\n${sub ? '✅ Лицо загружено' : '❌ Лица нет'}\n${sty ? '✅ Стиль загружен' : '❌ Стиля нет'}\n🔢 Промтов: ${cnt}`,
-      reply_markup: keyboard,
-      parse_mode: 'Markdown'
+      reply_markup: keyboard
     })
   });
 }
 
-async function processAlchemy(subId?: string, styId?: string, count: number = 3): Promise<string[]> {
+// GEMINI LOGIC
+async function performAlchemy(file1: string, file2: string | null, type: string, count: number): Promise<string[]> {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const parts: any[] = [];
   
-  let instruction = `You are a prompt engineer. Generate exactly ${count} high-end image generation prompts.`;
+  let instruction = `Generate ${count} high-quality image prompts based on provided images.`;
 
-  if (subId && styId) {
-    instruction += ` Merge the subject from image 1 with the artistic style/lighting/composition of image 2. Make it cohesive.`;
-    const [subB64, styB64] = await Promise.all([downloadToB64(subId), downloadToB64(styId)]);
+  if (file2 || type === 'mix') {
+    instruction += ` Image 1 is the subject (face/person). Image 2 is the artistic style/lighting. Mix them perfectly.`;
+    const [b1, b2] = await Promise.all([downloadToB64(file1), downloadToB64(file2!)]);
     parts.push({ text: instruction });
-    parts.push({ inlineData: { mimeType: 'image/jpeg', data: subB64 } });
-    parts.push({ inlineData: { mimeType: 'image/jpeg', data: styB64 } });
-  } else if (subId) {
-    instruction += ` Focus on the person in this image. Create creative cinematic settings for them while keeping the face consistent.`;
-    const subB64 = await downloadToB64(subId);
+    parts.push({ inlineData: { mimeType: 'image/jpeg', data: b1 } });
+    parts.push({ inlineData: { mimeType: 'image/jpeg', data: b2 } });
+  } else {
+    if (type === 'face') {
+      instruction += ` The provided image is a subject. Create cinematic prompts with varied outfits/settings for this specific person.`;
+    } else {
+      instruction += ` The provided image is a style reference. Create prompts that replicate this exact aesthetic for random subjects.`;
+    }
+    const b1 = await downloadToB64(file1);
     parts.push({ text: instruction });
-    parts.push({ inlineData: { mimeType: 'image/jpeg', data: subB64 } });
-  } else if (styId) {
-    instruction += ` Reverse-engineer the style of this image. Create prompts that apply this specific aesthetic to various random subjects.`;
-    const styB64 = await downloadToB64(styId);
-    parts.push({ text: instruction });
-    parts.push({ inlineData: { mimeType: 'image/jpeg', data: styB64 } });
+    parts.push({ inlineData: { mimeType: 'image/jpeg', data: b1 } });
   }
 
   const response = await ai.models.generateContent({
@@ -175,6 +208,7 @@ async function processAlchemy(subId?: string, styId?: string, count: number = 3)
   return data.prompts;
 }
 
+// TELEGRAM API WRAPPERS
 async function downloadToB64(fileId: string): Promise<string> {
   const fileRes = await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/getFile?file_id=${fileId}`);
   const fileData = await fileRes.json();
@@ -184,26 +218,18 @@ async function downloadToB64(fileId: string): Promise<string> {
   return encode(new Uint8Array(arrayBuffer));
 }
 
-async function answerCallback(id: string, text: string) {
-  await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/answerCallbackQuery`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ callback_query_id: id, text: text })
-  });
-}
-
-async function editMessageText(chatId: number, messageId: number, text: string) {
-  await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/editMessageText`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, message_id: messageId, text: text })
-  });
-}
-
 async function sendTelegramMessage(chatId: number, text: string) {
   await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text: text, parse_mode: 'Markdown' })
+    body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown' })
+  });
+}
+
+async function answerCallback(id: string, text: string) {
+  await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/answerCallbackQuery`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ callback_query_id: id, text })
   });
 }
