@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import ImageUploader from './components/ImageUploader';
 import { UploadedImage, LoadingState, GenerationMode, PromptGroup, GeneratedPrompt } from './types';
 import { generatePrompts } from './services/geminiService';
-import { WandIcon, CopyIcon, SparklesIcon, ImageIcon, UserIcon, TrashIcon } from './components/Icons';
+import { WandIcon, CopyIcon, SparklesIcon, ImageIcon, UserIcon, TrashIcon, TelegramIcon } from './components/Icons';
 
 const MAX_IMAGES_PER_CATEGORY = 5;
 const MAX_HISTORY_ITEMS = 10;
@@ -114,6 +114,14 @@ const App: React.FC = () => {
             <h1 className="text-xl font-bold text-white tracking-tight">Prompt Alchemy</h1>
           </div>
           <div className="flex items-center gap-4">
+            <a 
+              href="https://t.me/promtalchhemy1_bot" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-full border border-slate-700 text-xs text-indigo-400 font-medium transition-colors"
+            >
+              <TelegramIcon className="w-3.5 h-3.5" /> Telegram Bot
+            </a>
             {history.length > 0 && (
               <button 
                 onClick={() => { if(confirm('Clear history?')) setHistory([]); }} 
