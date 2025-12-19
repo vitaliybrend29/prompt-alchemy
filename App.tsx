@@ -28,18 +28,19 @@ const App: React.FC = () => {
   const [styleImages, setStyleImages] = useState<UploadedImage[]>([]);
   const [subjectImages, setSubjectImages] = useState<UploadedImage[]>([]);
   const [promptCount, setPromptCount] = useState<number>(3);
-  const [isRandomMode, setIsRandomMode] = useState<boolean>(false);
+  const [genMode, setGenMode] = useState<GenerationMode>(GenerationMode.MATCH_STYLE);
+  const [customSceneText, setCustomSceneText] = useState<string>('');
   const [history, setHistory] = useState<PromptGroup[]>([]);
   const [loadingState, setLoadingState] = useState<LoadingState>(LoadingState.IDLE);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const saved = localStorage.getItem('prompt_alchemy_v3_compact');
+    const saved = localStorage.getItem('prompt_alchemy_v4');
     if (saved) {
       try {
         setHistory(JSON.parse(saved));
       } catch (e) {
-        localStorage.removeItem('prompt_alchemy_v3_compact');
+        localStorage.removeItem('prompt_alchemy_v4');
       }
     }
   }, []);
@@ -47,17 +48,24 @@ const App: React.FC = () => {
   useEffect(() => {
     try {
       const historyToSave = history.slice(0, MAX_HISTORY_ITEMS);
-      localStorage.setItem('prompt_alchemy_v3_compact', JSON.stringify(historyToSave));
+      localStorage.setItem('prompt_alchemy_v4', JSON.stringify(historyToSave));
     } catch (e) {}
   }, [history]);
 
   const handleGenerate = async () => {
     const hasSubject = subjectImages.length > 0;
     const hasStyle = styleImages.length > 0;
-    const canGen = (isRandomMode && hasSubject) || hasStyle;
-
-    if (!canGen) {
-      setError("Add at least one reference image.");
+    
+    if (genMode === GenerationMode.CUSTOM_SCENE && (!hasSubject || !customSceneText.trim())) {
+      setError("Add a subject photo and describe the scene.");
+      return;
+    }
+    if (genMode === GenerationMode.MATCH_STYLE && !hasStyle) {
+      setError("Add at least one style reference image.");
+      return;
+    }
+    if (genMode === GenerationMode.RANDOM_CREATIVE && !hasSubject) {
+      setError("Add a subject photo for random creative mode.");
       return;
     }
     
@@ -65,8 +73,7 @@ const App: React.FC = () => {
     setLoadingState(LoadingState.ANALYZING);
 
     try {
-      const mode = isRandomMode ? GenerationMode.RANDOM_CREATIVE : GenerationMode.MATCH_STYLE;
-      const results = await generatePrompts(styleImages, subjectImages, promptCount, mode);
+      const results = await generatePrompts(styleImages, subjectImages, promptCount, genMode, customSceneText);
 
       const promptsWithThumbnails: GeneratedPrompt[] = await Promise.all(
         results.map(async (p) => ({
@@ -81,7 +88,7 @@ const App: React.FC = () => {
         prompts: promptsWithThumbnails,
         styleReferences: [],
         subjectReferences: [],
-        mode
+        mode: genMode
       };
 
       setHistory(prev => [newGroup, ...prev].slice(0, MAX_HISTORY_ITEMS));
@@ -126,7 +133,7 @@ const App: React.FC = () => {
           <div className="bg-surface rounded-2xl p-5 border border-slate-700/50 shadow-2xl sticky top-24">
             <div className="space-y-6">
               <ImageUploader 
-                label="Subject (The Girl)"
+                label="Target (Person's Face)"
                 images={subjectImages}
                 maxCount={MAX_IMAGES_PER_CATEGORY}
                 onImagesUpload={(imgs) => setSubjectImages(prev => [...prev, ...imgs].slice(0, MAX_IMAGES_PER_CATEGORY))}
@@ -134,7 +141,7 @@ const App: React.FC = () => {
                 icon={<UserIcon className="w-4 h-4 text-purple-400" />}
               />
 
-              <div className={isRandomMode ? 'opacity-40 pointer-events-none grayscale' : ''}>
+              {genMode === GenerationMode.MATCH_STYLE && (
                 <ImageUploader 
                   label="Style Reference"
                   images={styleImages}
@@ -143,16 +150,34 @@ const App: React.FC = () => {
                   onRemove={(id) => setStyleImages(prev => prev.filter(i => i.id !== id))}
                   icon={<ImageIcon className="w-4 h-4 text-indigo-400" />}
                 />
-              </div>
+              )}
+
+              {genMode === GenerationMode.CUSTOM_SCENE && (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-gray-300 flex items-center gap-2">
+                    <SparklesIcon className="w-4 h-4 text-pink-400" />
+                    Describe the Scene
+                  </label>
+                  <textarea 
+                    value={customSceneText}
+                    onChange={(e) => setCustomSceneText(e.target.value)}
+                    placeholder="E.g. sitting in a vintage library with glowing magical books..."
+                    className="w-full h-24 bg-slate-900 border border-slate-700 rounded-xl p-3 text-xs text-slate-300 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none resize-none transition-all placeholder:text-slate-600"
+                  />
+                </div>
+              )}
 
               <div className="space-y-4 pt-4 border-t border-slate-700/50">
-                <div className="flex bg-slate-900/50 p-1 rounded-xl border border-slate-700">
-                  <button onClick={() => setIsRandomMode(false)} className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all ${!isRandomMode ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500'}`}>Match Style</button>
-                  <button onClick={() => setIsRandomMode(true)} className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all ${isRandomMode ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-sm' : 'text-slate-500'}`}>Random Creative</button>
+                <div className="grid grid-cols-1 gap-2 bg-slate-900/50 p-1 rounded-xl border border-slate-700">
+                  <div className="flex gap-1">
+                    <button onClick={() => setGenMode(GenerationMode.MATCH_STYLE)} className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg transition-all ${genMode === GenerationMode.MATCH_STYLE ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500'}`}>Match Style</button>
+                    <button onClick={() => setGenMode(GenerationMode.CUSTOM_SCENE)} className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg transition-all ${genMode === GenerationMode.CUSTOM_SCENE ? 'bg-pink-600 text-white shadow-sm' : 'text-slate-500'}`}>Custom Scene</button>
+                    <button onClick={() => setGenMode(GenerationMode.RANDOM_CREATIVE)} className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg transition-all ${genMode === GenerationMode.RANDOM_CREATIVE ? 'bg-purple-600 text-white shadow-sm' : 'text-slate-500'}`}>Random</button>
+                  </div>
                 </div>
 
                 <div className="flex flex-col gap-1">
-                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider ml-1">Prompts per image</span>
+                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider ml-1">Variations</span>
                   <div className="grid grid-cols-4 gap-2">
                     {[1, 2, 3, 5].map(n => (
                       <button key={n} onClick={() => setPromptCount(n)} className={`py-1.5 rounded-lg text-xs font-bold border transition-all ${promptCount === n ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-500'}`}>{n}</button>
@@ -168,7 +193,7 @@ const App: React.FC = () => {
                   {loadingState === LoadingState.ANALYZING ? (
                     <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
                   ) : (
-                    <><WandIcon className="w-4 h-4" /> Generate Alchemy</>
+                    <><WandIcon className="w-4 h-4" /> Start Alchemy</>
                   )}
                 </button>
                 {error && <p className="text-[10px] text-red-400 text-center">{error}</p>}
@@ -177,24 +202,24 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        {/* OUTPUT/HISTORY LIST */}
+        {/* OUTPUT AREA */}
         <div className="lg:col-span-8 space-y-6">
           {history.length === 0 && loadingState === LoadingState.IDLE && (
             <div className="flex flex-col items-center justify-center h-96 border-2 border-dashed border-slate-800 rounded-3xl text-slate-600">
               <SparklesIcon className="w-12 h-12 mb-4 opacity-20" />
-              <p className="text-sm">Upload images and hit generate to begin.</p>
+              <p className="text-sm">Add target images and pick a mode to start.</p>
             </div>
           )}
 
           {history.map((group) => (
-            <div key={group.id} className="bg-surface/50 rounded-2xl border border-slate-800 overflow-hidden shadow-xl animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div key={group.id} className="bg-surface/50 rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
               <div className="bg-slate-800/50 px-5 py-3 border-b border-slate-700/50 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="p-1.5 rounded-lg bg-slate-700/50">
-                    {group.mode === GenerationMode.RANDOM_CREATIVE ? <UserIcon className="w-4 h-4 text-purple-400" /> : <ImageIcon className="w-4 h-4 text-indigo-400" />}
+                    {group.mode === GenerationMode.CUSTOM_SCENE ? <SparklesIcon className="w-4 h-4 text-pink-400" /> : <ImageIcon className="w-4 h-4 text-indigo-400" />}
                   </div>
                   <div className="text-[10px] uppercase font-bold tracking-widest text-slate-400">
-                    {new Date(group.timestamp).toLocaleTimeString()} • {group.mode.replace('_', ' ')} • {group.prompts.length} Prompts
+                    {new Date(group.timestamp).toLocaleTimeString()} • {group.mode.replace('_', ' ')}
                   </div>
                 </div>
               </div>
@@ -203,19 +228,19 @@ const App: React.FC = () => {
                 {group.prompts.map((prompt, idx) => (
                   <div key={idx} className="flex gap-4 group">
                     {prompt.referenceImage && (
-                      <div className="flex-shrink-0 w-20 h-20 rounded-lg overflow-hidden border border-slate-700 shadow-md bg-slate-800">
+                      <div className="flex-shrink-0 w-20 h-20 rounded-lg overflow-hidden border border-slate-700 shadow-md">
                         <img src={prompt.referenceImage} alt="Ref" className="w-full h-full object-cover" />
                       </div>
                     )}
                     
-                    <div className="flex-grow bg-slate-900/40 rounded-xl p-4 border border-slate-700/30 hover:border-indigo-500/30 transition-all relative">
+                    <div className="flex-grow bg-slate-900/40 rounded-xl p-4 border border-slate-700/30 group-hover:border-indigo-500/30 transition-all relative">
                       <div className="flex justify-between items-start gap-3 mb-2">
-                        <span className="text-[9px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded font-bold uppercase tracking-tighter">AI Output</span>
+                        <span className="text-[9px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded font-bold uppercase">Prompt {idx + 1}</span>
                         <button onClick={() => copyToClipboard(prompt.text)} className="text-slate-500 hover:text-white p-1 bg-slate-800 rounded opacity-0 group-hover:opacity-100 transition-opacity">
                           <CopyIcon className="w-3.5 h-3.5" />
                         </button>
                       </div>
-                      <p className="text-sm text-slate-300 leading-relaxed font-mono select-all">{prompt.text}</p>
+                      <p className="text-sm text-slate-300 leading-relaxed font-mono selection:bg-indigo-500/40">{prompt.text}</p>
                     </div>
                   </div>
                 ))}

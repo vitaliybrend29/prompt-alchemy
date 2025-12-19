@@ -1,3 +1,4 @@
+
 export interface UploadedImage {
   id: string;
   file?: File;
@@ -9,6 +10,7 @@ export interface UploadedImage {
 export enum GenerationMode {
   MATCH_STYLE = 'MATCH_STYLE',
   RANDOM_CREATIVE = 'RANDOM_CREATIVE',
+  CUSTOM_SCENE = 'CUSTOM_SCENE',
 }
 
 export interface GeneratedPrompt {

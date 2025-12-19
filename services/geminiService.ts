@@ -15,35 +15,38 @@ export const generatePrompts = async (
   styleImages: UploadedImage[],
   subjectImages: UploadedImage[],
   count: number,
-  mode: GenerationMode
+  mode: GenerationMode,
+  customText?: string
 ): Promise<{ text: string; referenceImage?: string }[]> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  let systemInstruction = `You are an expert prompt engineer for high-end AI image generators. 
-  CRITICAL: You will be provided with one or more images. 
-  For EACH reference image provided, you must generate exactly ${count} prompts.
+  let systemInstruction = `You are an expert prompt engineer for high-end AI image generators (Midjourney, Stable Diffusion). 
+  CRITICAL: Maintain subject consistency based on the provided photos. 
+  DO NOT use words like "the person in the photo". Describe their features (hair color, face shape, eyes) directly as part of the prompt.
   Return a JSON object: { "results": [ { "imageIndex": number, "prompts": ["string", ...] }, ... ] }`;
 
   const parts: any[] = [];
-  let userPrompt = "";
-
-  if (mode === GenerationMode.RANDOM_CREATIVE && subjectImages.length > 0) {
-    userPrompt = `
-      I have provided ${subjectImages.length} subject image(s).
-      For EACH subject image, generate ${count} DISTINCT photorealistic "Instagram/Pinterest style" prompts.
-      Maintain subject consistency. Use varied outfits (bikinis, lingerie, jackets, glasses) and settings.
-    `;
-    parts.push({ text: userPrompt });
-    subjectImages.forEach(img => {
-      parts.push({ inlineData: { mimeType: img.mimeType, data: cleanBase64(img.base64) } });
-    });
+  
+  if (mode === GenerationMode.CUSTOM_SCENE && subjectImages.length > 0 && customText) {
+    parts.push({ text: `
+      I have provided subject images. 
+      Generate ${count} prompts for EACH subject that places them in this specific scene: "${customText}".
+      Describe the person's identity from the photos and integrate them into the scene naturally.
+    ` });
+    subjectImages.forEach(img => parts.push({ inlineData: { mimeType: img.mimeType, data: cleanBase64(img.base64) } }));
+  }
+  else if (mode === GenerationMode.RANDOM_CREATIVE && subjectImages.length > 0) {
+    parts.push({ text: `
+      Generate ${count} DISTINCT high-end editorial/fashion prompts for EACH subject image provided.
+      Varied outfits and luxury settings. Maintain facial identity.
+    ` });
+    subjectImages.forEach(img => parts.push({ inlineData: { mimeType: img.mimeType, data: cleanBase64(img.base64) } }));
   } 
   else if (styleImages.length > 0) {
-    userPrompt = `
-      I have provided ${styleImages.length} style reference image(s) ${subjectImages.length > 0 ? `and ${subjectImages.length} subject(s)` : ''}.
-      For EACH style image, generate ${count} prompts ${subjectImages.length > 0 ? 'featuring the provided subject' : ''} that replicate that specific image's aesthetic/lighting/composition.
-    `;
-    parts.push({ text: userPrompt });
+    parts.push({ text: `
+      For EACH style image, generate ${count} prompts ${subjectImages.length > 0 ? 'featuring the provided subject' : 'with a fitting subject'} 
+      that replicate the EXACT aesthetic, lighting, and medium of the style reference.
+    ` });
     styleImages.forEach(img => parts.push({ inlineData: { mimeType: img.mimeType, data: cleanBase64(img.base64) } }));
     if (subjectImages.length > 0) {
       subjectImages.forEach(img => parts.push({ inlineData: { mimeType: img.mimeType, data: cleanBase64(img.base64) } }));
@@ -68,10 +71,7 @@ export const generatePrompts = async (
                 type: Type.OBJECT,
                 properties: {
                   imageIndex: { type: Type.INTEGER },
-                  prompts: {
-                    type: Type.ARRAY,
-                    items: { type: Type.STRING }
-                  }
+                  prompts: { type: Type.ARRAY, items: { type: Type.STRING } }
                 },
                 required: ["imageIndex", "prompts"]
               }
@@ -82,16 +82,11 @@ export const generatePrompts = async (
       }
     });
 
-    const responseText = response.text;
-    if (!responseText) {
-      throw new Error("Model returned an empty response.");
-    }
-
-    const parsed: GeminiResponse = JSON.parse(responseText);
+    const parsed: GeminiResponse = JSON.parse(response.text || '{"results":[]}');
     const finalPrompts: { text: string; referenceImage?: string }[] = [];
 
     parsed.results.forEach(res => {
-      const refImg = mode === GenerationMode.RANDOM_CREATIVE 
+      const refImg = (mode === GenerationMode.RANDOM_CREATIVE || mode === GenerationMode.CUSTOM_SCENE)
         ? subjectImages[res.imageIndex]?.base64 
         : styleImages[res.imageIndex]?.base64;
 
@@ -103,6 +98,6 @@ export const generatePrompts = async (
     return finalPrompts;
   } catch (error) {
     console.error("Gemini Error:", error);
-    throw new Error("Failed to generate. Try fewer images or check connection.");
+    throw new Error("Failed to generate prompts.");
   }
 };
