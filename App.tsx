@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import ImageUploader from './components/ImageUploader';
 import { UploadedImage, LoadingState, GenerationMode, PromptGroup, GeneratedPrompt } from './types';
 import { generatePrompts } from './services/geminiService';
-import { WandIcon, CopyIcon, SparklesIcon, ImageIcon, UserIcon, TrashIcon, TelegramIcon } from './components/Icons';
+import { WandIcon, CopyIcon, SparklesIcon, ImageIcon, UserIcon, TrashIcon } from './components/Icons';
 
 const MAX_IMAGES_PER_CATEGORY = 5;
 const MAX_HISTORY_ITEMS = 10;
@@ -32,7 +32,6 @@ const App: React.FC = () => {
   const [history, setHistory] = useState<PromptGroup[]>([]);
   const [loadingState, setLoadingState] = useState<LoadingState>(LoadingState.IDLE);
   const [error, setError] = useState<string | null>(null);
-  const [showBotInfo, setShowBotInfo] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem('prompt_alchemy_v3_compact');
@@ -108,12 +107,6 @@ const App: React.FC = () => {
             <h1 className="text-xl font-bold text-white tracking-tight">Prompt Alchemy</h1>
           </div>
           <div className="flex items-center gap-4">
-            <button 
-              onClick={() => setShowBotInfo(!showBotInfo)}
-              className="flex items-center gap-2 text-xs font-medium text-slate-400 hover:text-indigo-400 transition-colors"
-            >
-              <TelegramIcon className="w-4 h-4" /> Bot Setup
-            </button>
             {history.length > 0 && (
               <button 
                 onClick={() => { if(confirm('Clear history?')) setHistory([]); }} 
@@ -130,23 +123,6 @@ const App: React.FC = () => {
         
         {/* INPUT PANEL */}
         <div className="lg:col-span-4 space-y-6">
-          {showBotInfo && (
-            <div className="bg-indigo-500/10 border border-indigo-500/30 rounded-2xl p-5 animate-in fade-in slide-in-from-top-4">
-              <div className="flex items-center gap-2 mb-3 text-indigo-400">
-                <TelegramIcon className="w-5 h-5" />
-                <h3 className="font-bold text-sm">Telegram Bot Alchemy</h3>
-              </div>
-              <p className="text-xs text-slate-400 leading-relaxed mb-4">
-                Вы можете использовать функции этого сайта прямо в Telegram. Просто отправьте фото боту.
-              </p>
-              <ol className="text-[11px] space-y-2 text-slate-500 list-decimal list-inside">
-                <li>Создайте бота в <a href="https://t.me/BotFather" target="_blank" className="text-indigo-400 underline">@BotFather</a></li>
-                <li>Добавьте <code className="bg-slate-800 px-1 rounded text-slate-300">TELEGRAM_BOT_TOKEN</code> в Vercel</li>
-                <li>Настройте Webhook (см. документацию)</li>
-              </ol>
-            </div>
-          )}
-
           <div className="bg-surface rounded-2xl p-5 border border-slate-700/50 shadow-2xl sticky top-24">
             <div className="space-y-6">
               <ImageUploader 
