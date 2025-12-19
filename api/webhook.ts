@@ -18,35 +18,47 @@ export default async function handler(req: any, res: any) {
   const { message, callback_query } = req.body;
 
   try {
-    // 1. HANDLE BUTTON CLICKS (CALLBACK QUERIES)
+    // 1. HANDLE BUTTON CLICKS
     if (callback_query) {
       const chatId = callback_query.message.chat.id;
       const messageId = callback_query.message.message_id;
       const data = callback_query.data;
 
-      // Schema: cmd|type|count|file1|file2
-      const [cmd, type, countStr, file1, file2] = data.split('|');
+      // Schema is now compact: cmd|type|count (to stay under 64 bytes)
+      const [cmd, type, countStr] = data.split('|');
       const count = parseInt(countStr || '3');
 
       if (cmd === 'toggle_type') {
         const nextType = type === 'face' ? 'style' : 'face';
-        await updateMenu(chatId, messageId, nextType, count, file1, file2);
+        await updateMenu(chatId, messageId, nextType, count);
       } 
       else if (cmd === 'toggle_count') {
         const nextCount = count === 1 ? 3 : count === 3 ? 5 : 1;
-        await updateMenu(chatId, messageId, type, nextCount, file1, file2);
+        await updateMenu(chatId, messageId, type, nextCount);
       } 
       else if (cmd === 'run') {
         await answerCallback(callback_query.id, "🪄 Алхимия запущена...");
+        
+        // Extract files from the message context instead of callback_data
+        const currentMsg = callback_query.message;
+        const mainPhoto = currentMsg.photo ? currentMsg.photo[currentMsg.photo.length - 1].file_id : null;
+        const repliedPhoto = currentMsg.reply_to_message?.photo ? currentMsg.reply_to_message.photo[currentMsg.reply_to_message.photo.length - 1].file_id : null;
+
+        if (!mainPhoto) {
+          await sendTelegramMessage(chatId, "❌ Не удалось найти фото для анализа.");
+          return res.status(200).send('ok');
+        }
+
         await sendTelegramMessage(chatId, "🧪 *Изучаю черты лица и художественный стиль...* Это займет около 15 секунд.");
 
         try {
-          const prompts = await performAlchemy(file1, file2, type, count);
+          // If there's a reply, it's always Mix mode: Reply (Face) + Current (Style)
+          const prompts = await performAlchemy(mainPhoto, repliedPhoto, type, count);
           const resultText = `✨ *Готово! Ваши промты:* \n\n` + prompts.join("\n\n---\n\n");
           await sendTelegramMessage(chatId, resultText);
         } catch (e) {
-          console.error(e);
-          await sendTelegramMessage(chatId, "❌ Ошибка генерации. Попробуйте другие фото или уменьшите количество промтов.");
+          console.error("Alchemy Error:", e);
+          await sendTelegramMessage(chatId, "❌ Ошибка генерации. Возможно, фото слишком большое или сервер перегружен.");
         }
       }
       return res.status(200).send('ok');
@@ -58,26 +70,20 @@ export default async function handler(req: any, res: any) {
 
       if (message.photo) {
         const photo = message.photo[message.photo.length - 1];
-        const fileId = photo.file_id;
         
-        // Alchemy Check: If user replied to a message that has a photo
+        // Alchemy Check
         const repliedMsg = message.reply_to_message;
-        const repliedPhoto = repliedMsg?.photo ? repliedMsg.photo[repliedMsg.photo.length - 1] : null;
+        const hasRepliedPhoto = !!(repliedMsg?.photo);
 
-        if (repliedPhoto) {
-          // Mixed Mode: Subject (replied) + Style (current)
-          await sendConfigMenu(chatId, "mix", 3, repliedPhoto.file_id, fileId, "✅ Обнаружено два фото! Готов смешать лицо из первого со стилем из второго.");
+        if (hasRepliedPhoto) {
+          await sendConfigMenu(chatId, "mix", 3, "✅ *Обнаружено два фото!*\nЯ смешаю лицо с первого фото и стиль со второго.");
         } else {
-          // Single Mode
-          await sendConfigMenu(chatId, "face", 3, fileId, "", "📸 Фото получено! Выберите роль для этого изображения:");
+          await sendConfigMenu(chatId, "face", 3, "📸 *Фото получено!*\nВыберите, как его использовать:");
         }
       } 
       else if (message.text === "/start") {
-        await sendTelegramMessage(chatId, "👋 Привет! Я *Prompt Alchemy Bot*.\n\nЯ умею вытаскивать стиль из фото и переносить лица на новые сюжеты.\n\n*Как работать:*\n1️⃣ Отправь фото.\n2️⃣ Выбери роль: *Лицо* (Target Face) или *Стиль* (Style).\n3️⃣ Чтобы смешать, отправь второе фото *ОТВЕТОМ* (Reply) на сообщение с первым.\n4️⃣ Жми *Запустить Алхимию*!");
+        await sendTelegramMessage(chatId, "👋 Привет! Я *Prompt Alchemy Bot*.\n\nЯ создаю профессиональные промты, объединяя лица людей с любыми стилями.\n\n*Как работать:*\n1️⃣ Отправь фото.\n2️⃣ Выбери роль: *Лицо* (Target Face) или *Стиль* (Style).\n3️⃣ Чтобы смешать, отправь второе фото *ОТВЕТОМ* (Reply) на сообщение с первым.\n4️⃣ Жми *Запустить Алхимию*!");
       } 
-      else {
-        await sendTelegramMessage(chatId, "📸 Пожалуйста, отправь *фотографию*, чтобы я мог начать анализ.");
-      }
     }
   } catch (error) {
     console.error("Global Webhook Error:", error);
@@ -86,9 +92,8 @@ export default async function handler(req: any, res: any) {
   return res.status(200).send('ok');
 }
 
-// UI HELPERS
-async function sendConfigMenu(chatId: number, type: string, count: number, f1: string, f2: string, text: string) {
-  const keyboard = buildKeyboard(type, count, f1, f2);
+async function sendConfigMenu(chatId: number, type: string, count: number, text: string) {
+  const keyboard = buildKeyboard(type, count);
   await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -101,8 +106,8 @@ async function sendConfigMenu(chatId: number, type: string, count: number, f1: s
   });
 }
 
-async function updateMenu(chatId: number, messageId: number, type: string, count: number, f1: string, f2: string) {
-  const keyboard = buildKeyboard(type, count, f1, f2);
+async function updateMenu(chatId: number, messageId: number, type: string, count: number) {
+  const keyboard = buildKeyboard(type, count);
   await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/editMessageReplyMarkup`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -114,55 +119,57 @@ async function updateMenu(chatId: number, messageId: number, type: string, count
   });
 }
 
-function buildKeyboard(type: string, count: number, f1: string, f2: string) {
+function buildKeyboard(type: string, count: number) {
   const typeLabel = type === 'face' ? "🧬 Лицо (Subject)" : type === 'style' ? "🎨 Стиль (Style)" : "🧪 Смешивание (Mix)";
+  // Buttons no longer contain file_id to respect 64-byte limit
   return {
     inline_keyboard: [
       [
-        { text: typeLabel, callback_data: `toggle_type|${type}|${count}|${f1}|${f2}` },
-        { text: `🔢 Промтов: ${count}`, callback_data: `toggle_count|${type}|${count}|${f1}|${f2}` }
+        { text: typeLabel, callback_data: `toggle_type|${type}|${count}` },
+        { text: `🔢 Промтов: ${count}`, callback_data: `toggle_count|${type}|${count}` }
       ],
-      [{ text: "🚀 Запустить Алхимию!", callback_data: `run|${type}|${count}|${f1}|${f2}` }]
+      [{ text: "🚀 Запустить Алхимию!", callback_data: `run|${type}|${count}` }]
     ]
   };
 }
 
-// CORE LOGIC: GEMINI PROMPT ENGINEERING
 async function performAlchemy(f1: string, f2: string | null, type: string, count: number): Promise<string[]> {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const parts: any[] = [];
   
-  let systemInstruction = `You are a world-class prompt engineer for Midjourney and Stable Diffusion.
-  Your task is to analyze images and create highly descriptive, professional prompts.
+  // Refined instructions to focus on "Seamless result"
+  let systemInstruction = `You are a professional Prompt Engineer for Midjourney.
+  Your goal is to describe a scene that perfectly blends the provided references.
+  
   RULES:
-  - DO NOT mention 'Image 1', 'Image 2', or 'the provided image' in the final prompts.
-  - The prompts must be standalone descriptions of a scene.
-  - Combine features naturally.
-  - Output exactly ${count} prompts.`;
+  - NEVER use phrases like "based on image", "image 1", "reference", or "mix these".
+  - Output ONLY the final prompts as if you are describing a high-end photography or digital art.
+  - Describe the person's identity (hair, face shape, eyes) and the environment's style (lighting, medium, color) as ONE cohesive vision.
+  - Prompts must be in English.
+  - Be highly descriptive and atmospheric.`;
 
-  if (f2 && f2 !== "") {
-    // ALCHEMY / MIX MODE
-    const [subB64, styB64] = await Promise.all([downloadToB64(f1), downloadToB64(f2)]);
+  if (f2) {
+    // MIX MODE (f1 is style from current msg, f2 is face from replied msg)
+    const [styB64, subB64] = await Promise.all([downloadToB64(f1), downloadToB64(f2)]);
     
     parts.push({ text: `
       Analyze these two images:
-      Image 1: The Subject (Face/Identity). Describe her facial features, hair, and essence precisely to keep her identity.
-      Image 2: The Style. Describe the lighting, camera angle, color grading, artistic medium (e.g., 35mm film, oil painting, digital art), and atmosphere.
+      Reference A: Use this for the PERSON'S IDENTITY.
+      Reference B: Use this for the ARTISTIC STYLE, LIGHTING, and MOOD.
       
-      TASK: Create ${count} prompts that place the person from Image 1 into a scene that perfectly matches the artistic style of Image 2. 
-      The person's features must be the core of the description.
-      Return a JSON array of strings: { "prompts": ["...", "..."] }
+      Generate ${count} prompts describing the person from Reference A standing in a setting that replicates the EXACT aesthetic of Reference B.
+      Return JSON: { "prompts": ["...", "..."] }
     `});
-    parts.push({ inlineData: { mimeType: 'image/jpeg', data: subB64 } });
-    parts.push({ inlineData: { mimeType: 'image/jpeg', data: styB64 } });
+    parts.push({ inlineData: { mimeType: 'image/jpeg', data: subB64 } }); // Face
+    parts.push({ inlineData: { mimeType: 'image/jpeg', data: styB64 } }); // Style
   } else {
-    // SINGLE IMAGE MODE
+    // SINGLE MODE
     const b1 = await downloadToB64(f1);
     const instruction = type === 'face' 
-      ? `Analyze this person's face. Create ${count} cinematic prompts that describe this specific person in varied high-end settings (e.g. cyberpunk city, tropical beach, royal palace) while keeping facial descriptions detailed to preserve identity.`
-      : `Analyze the artistic style, color palette, and lighting of this image. Create ${count} prompts that describe this exact aesthetic but apply it to new interesting subjects (e.g. a futuristic robot, a majestic lion, a lone traveler).`;
+      ? `This is a portrait. Create ${count} prompts describing this specific person in new epic cinematic settings, keeping the description of their facial features very detailed.`
+      : `This is a style reference. Create ${count} prompts that capture this aesthetic (lighting, color, camera) and apply it to various interesting subjects.`;
     
-    parts.push({ text: instruction + ` Return a JSON object: { "prompts": ["...", "..."] }` });
+    parts.push({ text: instruction + ` Return JSON: { "prompts": ["...", "..."] }` });
     parts.push({ inlineData: { mimeType: 'image/jpeg', data: b1 } });
   }
 
@@ -186,11 +193,10 @@ async function performAlchemy(f1: string, f2: string | null, type: string, count
   return data.prompts;
 }
 
-// UTILS
 async function downloadToB64(fileId: string): Promise<string> {
   const fileRes = await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/getFile?file_id=${fileId}`);
   const fileData = await fileRes.json();
-  if (!fileData.ok) throw new Error("Telegram getFile failed");
+  if (!fileData.ok) throw new Error("Telegram getFile failed: " + JSON.stringify(fileData));
   const filePath = fileData.result.file_path;
   const imgRes = await fetch(`https://api.telegram.org/file/bot${TELEGRAM_TOKEN}/${filePath}`);
   const arrayBuffer = await imgRes.arrayBuffer();
