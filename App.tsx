@@ -81,8 +81,8 @@ const App: React.FC = () => {
   const convertToPublicUrl = async (image: UploadedImage): Promise<string | undefined> => {
     const keyToUse = imgbbKey || process.env.IMGBB_API_KEY;
     
-    if (!keyToUse) {
-      setError("Please set an ImgBB API Key (in Settings or Vercel Environment) to convert images to links.");
+    if (!keyToUse || keyToUse === 'undefined') {
+      setError("Please set an ImgBB API Key in Settings to convert images to links.");
       return undefined;
     }
 
@@ -99,7 +99,7 @@ const App: React.FC = () => {
       const result = await response.json();
       if (result.success && result.data && result.data.url) {
         console.log("Image successfully converted to link:", result.data.url);
-        return result.data.url;
+        return result.data.url; // Это прямая ссылка i.ibb.co
       } else {
         throw new Error(result.error?.message || "ImgBB upload failed");
       }
@@ -110,10 +110,10 @@ const App: React.FC = () => {
   };
 
   const handleImageUpload = async (newImages: UploadedImage[], setter: React.Dispatch<React.SetStateAction<UploadedImage[]>>) => {
-    // 1. Сразу добавляем в стейт, чтобы пользователь видел превью
+    // 1. Добавляем временные объекты
     setter(prev => [...prev, ...newImages].slice(0, MAX_IMAGES_PER_CATEGORY));
 
-    // 2. Параллельно запускаем загрузку на ImgBB для каждого нового изображения
+    // 2. Последовательно загружаем каждый файл
     for (const img of newImages) {
       setter(prev => prev.map(i => i.id === img.id ? { ...i, isUploading: true } : i));
       
@@ -145,10 +145,16 @@ const App: React.FC = () => {
       return;
     }
 
-    // Проверяем, все ли изображения успели конвертироваться в ссылки
-    const pendingConversions = [...subjectImages, ...styleImages].some(img => img.isUploading || !img.publicUrl);
-    if (pendingConversions) {
-      setError("Please wait, images are still being converted to links...");
+    // КРИТИЧЕСКИЙ МОМЕНТ: Проверяем наличие ПУБЛИЧНЫХ ссылок
+    const isConverting = [...subjectImages, ...styleImages].some(img => img.isUploading);
+    if (isConverting) {
+      setError("Still converting images to links... please wait.");
+      return;
+    }
+
+    const missingUrls = [...subjectImages, ...styleImages].some(img => !img.publicUrl);
+    if (missingUrls) {
+      setError("Some images failed to upload to ImgBB. Please re-upload them or check your API key.");
       return;
     }
 
@@ -165,22 +171,19 @@ const App: React.FC = () => {
         }))
       );
 
+      // Сохраняем в историю ТОЛЬКО публичные ссылки
       const newGroup: PromptGroup = {
         id: Date.now().toString(),
         timestamp: Date.now(),
         prompts: promptsWithThumbnails,
-        styleReferences: styleImages.map(i => i.publicUrl || i.base64),
-        subjectReferences: subjectImages.map(i => i.publicUrl || i.base64),
+        styleReferences: styleImages.map(i => i.publicUrl!),
+        subjectReferences: subjectImages.map(i => i.publicUrl!),
         mode: genMode,
       };
 
       setHistory(prev => [newGroup, ...prev].slice(0, MAX_HISTORY_ITEMS));
       setLoadingState(LoadingState.IDLE);
     } catch (err: any) {
-      if (err.message?.includes("Requested entity was not found")) {
-        // @ts-ignore
-        if (window.aistudio) await window.aistudio.openSelectKey();
-      }
       setError(err.message || "Something went wrong.");
       setLoadingState(LoadingState.ERROR);
     }
@@ -198,11 +201,18 @@ const App: React.FC = () => {
 
     try {
       const faceRef = group.subjectReferences[0];
+      
+      // Если в старой истории лежит base64, пытаемся найти актуальную ссылку из текущего стейта
+      let finalFaceUrl = faceRef;
       if (!faceRef || !faceRef.startsWith('http')) {
-        throw new Error("No public link (URL) found for the face. Please re-upload the image.");
+        if (subjectImages.length > 0 && subjectImages[0].publicUrl) {
+          finalFaceUrl = subjectImages[0].publicUrl;
+        } else {
+          throw new Error("This history item has no public link. Please clear history and upload the photo again.");
+        }
       }
       
-      const imageUrl = await generateGeminiImage(promptObj.text, faceRef);
+      const imageUrl = await generateGeminiImage(promptObj.text, finalFaceUrl);
       
       setHistory(prev => {
         const next = [...prev];
@@ -210,10 +220,6 @@ const App: React.FC = () => {
         return next;
       });
     } catch (err: any) {
-      if (err.message?.includes("Requested entity was not found")) {
-        // @ts-ignore
-        if (window.aistudio) await window.aistudio.openSelectKey();
-      }
       setHistory(prev => {
         const next = [...prev];
         next[groupIndex].prompts[promptIndex] = { ...next[groupIndex].prompts[promptIndex], isGenerating: false, error: err.message };
@@ -225,6 +231,9 @@ const App: React.FC = () => {
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
   };
+
+  // Флаг занятости загрузкой
+  const isAnyImageUploading = [...subjectImages, ...styleImages].some(img => img.isUploading);
 
   return (
     <div className="min-h-screen bg-background text-slate-200 pb-20 selection:bg-indigo-500/30">
@@ -255,10 +264,10 @@ const App: React.FC = () => {
             </a>
             {history.length > 0 && (
               <button 
-                onClick={() => { if(confirm('Clear history?')) setHistory([]); }} 
+                onClick={() => { if(confirm('Clear history? (Highly recommended after changing API keys)')) setHistory([]); }} 
                 className="text-xs text-slate-500 hover:text-red-400 flex items-center gap-1 transition-colors"
               >
-                <TrashIcon className="w-3 h-3" /> Clear
+                <TrashIcon className="w-3 h-3" /> Clear History
               </button>
             )}
           </div>
@@ -287,10 +296,10 @@ const App: React.FC = () => {
               <div className="space-y-4 border-l border-slate-800 pl-0 md:pl-6">
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
                   <ImageIcon className="w-4 h-4 text-emerald-400" />
-                  ImgBB Converter (PNG Link Creator)
+                  ImgBB Converter (Direct PNG Link)
                 </h3>
                 <p className="text-[11px] text-slate-400 leading-relaxed">
-                  Required for Kie.ai compatibility. If set in Vercel, manual input is not needed. <a href="https://api.imgbb.com/" target="_blank" className="text-indigo-400 underline">Get a free key here</a>.
+                  Required for Kie.ai. If set in Vercel (IMGBB_API_KEY), manual input is not needed. <a href="https://api.imgbb.com/" target="_blank" className="text-indigo-400 underline">Get a free key here</a>.
                 </p>
                 <input 
                   type="password"
@@ -375,16 +384,18 @@ const App: React.FC = () => {
 
                 <button
                   onClick={handleGenerate}
-                  disabled={loadingState === LoadingState.ANALYZING}
-                  className="w-full py-3 px-4 rounded-xl text-white font-bold shadow-lg flex items-center justify-center gap-2 disabled:opacity-50 transition-all bg-gradient-to-r from-indigo-600 to-purple-600 hover:shadow-indigo-500/20"
+                  disabled={loadingState === LoadingState.ANALYZING || isAnyImageUploading}
+                  className="w-full py-3 px-4 rounded-xl text-white font-bold shadow-lg flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all bg-gradient-to-r from-indigo-600 to-purple-600 hover:shadow-indigo-500/20"
                 >
                   {loadingState === LoadingState.ANALYZING ? (
                     <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                  ) : isAnyImageUploading ? (
+                    <><span className="w-3 h-3 border border-white/30 border-t-white rounded-full animate-spin"></span> Converting to links...</>
                   ) : (
                     <><WandIcon className="w-4 h-4" /> Start Alchemy</>
                   )}
                 </button>
-                {error && <p className="text-[10px] text-red-400 text-center font-bold bg-red-400/10 py-2 rounded-lg">{error}</p>}
+                {error && <p className="text-[10px] text-red-400 text-center font-bold bg-red-400/10 py-2 rounded-lg mt-2">{error}</p>}
               </div>
             </div>
           </div>
