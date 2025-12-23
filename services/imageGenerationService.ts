@@ -9,21 +9,20 @@ const getApiKey = () => {
 
 /**
  * Опрашивает API для получения статуса задачи.
- * Использует официальный метод recordInfo согласно документации Kie.ai.
+ * Строго следует формату GET /recordInfo?taskId=...
  */
 export const pollTaskStatus = async (taskId: string): Promise<string> => {
   const apiKey = getApiKey();
-  const maxAttempts = 100; // Увеличиваем лимит попыток
+  const maxAttempts = 120; // Ожидание до 10-12 минут
   let attempts = 0;
   
-  // ВАЖНО: Используем правильный эндпоинт из документации
+  // Формируем URL с query-параметром taskId
   const statusUrl = `${KIE_API_JOBS_BASE}/recordInfo?taskId=${taskId}`;
-
-  console.log(`[Task ${taskId}] Начинаю опрос по адресу: ${statusUrl}`);
 
   while (attempts < maxAttempts) {
     try {
       const response = await fetch(statusUrl, {
+        method: 'GET',
         headers: { 
           "Authorization": `Bearer ${apiKey}`,
           "Cache-Control": "no-cache" 
@@ -31,7 +30,6 @@ export const pollTaskStatus = async (taskId: string): Promise<string> => {
       });
 
       if (!response.ok) {
-        console.warn(`[Task ${taskId}] Ошибка HTTP: ${response.status}`);
         attempts++;
         await new Promise(r => setTimeout(r, 5000));
         continue;
@@ -39,76 +37,65 @@ export const pollTaskStatus = async (taskId: string): Promise<string> => {
 
       const raw = await response.json();
       
-      // Согласно документации, данные лежат в поле "data"
-      if (raw.code !== 200) {
-        console.warn(`[Task ${taskId}] API вернул код ${raw.code}: ${raw.message}`);
-      }
-
-      const result = raw.data;
-      if (!result) {
+      // По спецификации: { code: 200, data: { state: "...", resultJson: "..." } }
+      if (raw.code !== 200 || !raw.data) {
         attempts++;
         await new Promise(r => setTimeout(r, 5000));
         continue;
       }
 
+      const result = raw.data;
       const state = (result.state || "").toLowerCase();
-      console.log(`[Task ${taskId}] Текущий статус: ${state}`);
+      
+      console.log(`[Polling] Task: ${taskId}, State: ${state}`);
 
       if (state === "success" || state === "completed") {
         let foundUrl = "";
         
-        // Обработка поля resultJson (строка, содержащая JSON)
+        // Обработка resultJson (как в вашем примере - это строка с JSON)
         if (result.resultJson) {
           try {
             const parsed = typeof result.resultJson === 'string' 
               ? JSON.parse(result.resultJson) 
               : result.resultJson;
               
-            if (parsed.resultUrls && Array.isArray(parsed.resultUrls) && parsed.resultUrls[0]) {
+            if (parsed.resultUrls && parsed.resultUrls[0]) {
               foundUrl = parsed.resultUrls[0];
             }
           } catch (e) {
-            console.warn(`[Task ${taskId}] Ошибка парсинга resultJson:`, e);
+            console.warn("Error parsing resultJson:", e);
           }
         }
 
-        // Запасные варианты, если URL в другом месте
-        if (!foundUrl) {
-          foundUrl = result.imageUrl || result.resultUrl || (result.result?.resultUrls ? result.result.resultUrls[0] : "");
-        }
+        // Запасные варианты
+        if (!foundUrl) foundUrl = result.imageUrl || result.resultUrl || (result.result?.resultUrls ? result.result.resultUrls[0] : "");
         
-        if (foundUrl) {
-          console.log(`[Task ${taskId}] ИЗОБРАЖЕНИЕ ГОТОВО: ${foundUrl}`);
-          return foundUrl;
-        } else {
-          console.error(`[Task ${taskId}] Статус "success", но URL не найден. Данные:`, result);
-        }
+        if (foundUrl) return foundUrl;
       }
 
       if (state === "fail" || state === "failed" || state === "error") {
-        throw new Error(result.failMsg || result.message || "Генерация отклонена сервером.");
+        throw new Error(result.failMsg || "Generation failed on server");
       }
 
     } catch (e: any) {
-      console.error(`[Task ${taskId}] Ошибка при опросе:`, e.message);
-      if (e.message.includes("отклонена")) throw e;
+      if (e.message.includes("failed")) throw e;
+      console.error("Polling error:", e);
     }
 
-    // Ждем 5-6 секунд перед следующим запросом
-    await new Promise(r => setTimeout(r, 6000));
+    await new Promise(r => setTimeout(r, 5000));
     attempts++;
   }
-  throw new Error("Время ожидания истекло. Изображение генерируется слишком долго.");
+  throw new Error("Polling timeout: Image is taking too long to generate.");
 };
 
 export const createTask = async (prompt: string, faceUrl: string, callbackUrl?: string): Promise<string> => {
   const apiKey = getApiKey();
-  if (!apiKey) throw new Error("API KEY (KIE_API_KEY) не найден в окружении.");
+  if (!apiKey) throw new Error("API KEY missing");
 
   const payload: any = {
     model: "google/nano-banana-edit",
     input: {
-      prompt: prompt,
+      prompt,
       image_urls: [faceUrl],
       output_format: "png",
       image_size: "1:1"
@@ -128,14 +115,9 @@ export const createTask = async (prompt: string, faceUrl: string, callbackUrl?: 
     body: JSON.stringify(payload)
   });
 
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Ошибка API при создании: ${res.status} ${errText}`);
-  }
-
   const data = await res.json();
   const taskId = data.data?.taskId || data.taskId;
   
-  if (!taskId) throw new Error(data.message || "Не удалось получить ID задачи от Kie.ai");
+  if (!taskId) throw new Error(data.message || "Failed to create task");
   return taskId;
 };

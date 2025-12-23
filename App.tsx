@@ -6,7 +6,7 @@ import { generatePrompts } from './services/geminiService';
 import { createTask, pollTaskStatus } from './services/imageGenerationService';
 import { WandIcon, CopyIcon, SparklesIcon, ImageIcon, UserIcon, TrashIcon, SettingsIcon, GridIcon } from './components/Icons';
 
-const MAX_HISTORY_ITEMS = 25;
+const MAX_HISTORY_ITEMS = 20;
 
 const createThumbnail = (base64: string, maxWidth = 200): Promise<string> => {
   return new Promise((resolve) => {
@@ -39,14 +39,12 @@ const App: React.FC = () => {
   const defaultCallback = typeof window !== 'undefined' ? `${window.location.origin}/api/callback` : '';
   const [callbackUrl, setCallbackUrl] = useState(localStorage.getItem('kie_callback_url') || defaultCallback);
 
-  // Восстановление истории и активных опросов при загрузке
   useEffect(() => {
-    const saved = localStorage.getItem('alchemy_history_v5');
+    const saved = localStorage.getItem('alchemy_history_clean');
     if (saved) {
       try {
         const parsed: PromptGroup[] = JSON.parse(saved);
         setHistory(parsed);
-        // Запускаем опрос для всех незавершенных задач
         parsed.forEach((group, gIdx) => {
           group.prompts.forEach((p, pIdx) => {
             if (p.taskId && !p.generatedImageUrl && !p.error) {
@@ -55,14 +53,13 @@ const App: React.FC = () => {
           });
         });
       } catch (e) {
-        localStorage.removeItem('alchemy_history_v5');
+        localStorage.removeItem('alchemy_history_clean');
       }
     }
   }, []);
 
-  // Синхронизация истории с localStorage
   useEffect(() => {
-    localStorage.setItem('alchemy_history_v5', JSON.stringify(history.slice(0, MAX_HISTORY_ITEMS)));
+    localStorage.setItem('alchemy_history_clean', JSON.stringify(history.slice(0, MAX_HISTORY_ITEMS)));
   }, [history]);
 
   const resumePolling = async (groupIdx: number, promptIdx: number, taskId: string) => {
@@ -130,8 +127,8 @@ const App: React.FC = () => {
   };
 
   const handleGenerate = async () => {
-    if (subjectImages.length === 0) { setError("Загрузите фото лица."); return; }
-    if (genMode === GenerationMode.MATCH_STYLE && styleImages.length === 0) { setError("Загрузите референс стиля."); return; }
+    if (subjectImages.length === 0) { setError("Please upload a face photo."); return; }
+    if (genMode === GenerationMode.MATCH_STYLE && styleImages.length === 0) { setError("Please upload style refs."); return; }
     
     setError(null);
     setLoadingState(LoadingState.ANALYZING);
@@ -166,7 +163,7 @@ const App: React.FC = () => {
 
     try {
       const faceUrl = group.subjectReferences[0];
-      if (!faceUrl) throw new Error("Публичная ссылка на лицо еще не готова. Подождите пару секунд.");
+      if (!faceUrl) throw new Error("Public image URL is still uploading...");
       
       const taskId = await createTask(prompt.text, faceUrl, callbackUrl);
       resumePolling(groupIdx, promptIdx, taskId);
@@ -176,253 +173,126 @@ const App: React.FC = () => {
   };
 
   const clearHistory = () => {
-    if (confirm("Удалить всю историю?")) {
+    if (confirm("Delete history?")) {
       setHistory([]);
-      localStorage.removeItem('alchemy_history_v5');
+      localStorage.removeItem('alchemy_history_clean');
     }
   };
 
   return (
-    <div className="min-h-screen bg-background text-slate-200 pb-20 selection:bg-indigo-500/30">
-      <header className="sticky top-0 z-50 bg-background/80 backdrop-blur-md border-b border-slate-800 px-4 py-4">
-        <div className="max-w-6xl mx-auto flex items-center justify-between">
+    <div className="min-h-screen bg-background text-slate-200 selection:bg-indigo-500/30 font-sans">
+      <header className="sticky top-0 z-50 bg-background/80 backdrop-blur-md border-b border-slate-800 px-6 py-4">
+        <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <SparklesIcon className="w-7 h-7 text-indigo-500 drop-shadow-[0_0_8px_rgba(99,102,241,0.5)]" />
-            <h1 className="text-xl font-black text-white tracking-tighter uppercase italic">Prompt Alchemy</h1>
+            <SparklesIcon className="w-6 h-6 text-indigo-500" />
+            <h1 className="text-xl font-bold text-white tracking-tight">Prompt Alchemy</h1>
           </div>
-          <div className="flex items-center gap-3">
-            <button 
-              onClick={clearHistory}
-              title="Очистить историю"
-              className="p-2.5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-full transition-all"
-            >
+          <div className="flex items-center gap-4">
+            <button onClick={clearHistory} className="p-2 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-all">
               <TrashIcon className="w-5 h-5" />
             </button>
-            <button 
-              onClick={() => setShowSettings(!showSettings)} 
-              className={`p-2.5 rounded-full transition-all ${showSettings ? 'bg-indigo-500/20 text-indigo-400' : 'text-slate-500 hover:text-white'}`}
-            >
+            <button onClick={() => setShowSettings(!showSettings)} className={`p-2 rounded-xl transition-all ${showSettings ? 'bg-indigo-500/20 text-indigo-400' : 'text-slate-400 hover:text-white'}`}>
               <SettingsIcon className="w-5 h-5" />
             </button>
           </div>
         </div>
-        
-        {showSettings && (
-          <div className="max-w-6xl mx-auto mt-4 p-6 bg-surface rounded-3xl border border-slate-700 shadow-2xl space-y-4 animate-in slide-in-from-top-4 duration-300">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">ImgBB API Key (для публичных ссылок)</label>
-                <input 
-                  type="password" 
-                  value={imgbbKey} 
-                  onChange={e => { setImgbbKey(e.target.value); localStorage.setItem('imgbb_key', e.target.value); }} 
-                  placeholder="Введите ключ ImgBB..." 
-                  className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-3 text-xs outline-none focus:border-indigo-500 transition-colors" 
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Callback URL (Webhook)</label>
-                <input 
-                  type="text" 
-                  value={callbackUrl} 
-                  onChange={e => { setCallbackUrl(e.target.value); localStorage.setItem('kie_callback_url', e.target.value); }} 
-                  placeholder="https://your-app.vercel.app/api/callback" 
-                  className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-3 text-xs outline-none focus:border-indigo-500 transition-colors" 
-                />
-              </div>
-            </div>
-            <p className="text-[9px] text-slate-500 italic">Сайт опрашивает сервер Kie.ai напрямую. Коллбэк нужен для внешних уведомлений (например, в Telegram).</p>
-          </div>
-        )}
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 mt-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
+      {showSettings && (
+        <div className="max-w-7xl mx-auto px-6 mt-4">
+          <div className="p-6 bg-surface rounded-2xl border border-slate-700 shadow-2xl space-y-4 animate-in slide-in-from-top-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">ImgBB API Key</label>
+                <input type="password" value={imgbbKey} onChange={e => { setImgbbKey(e.target.value); localStorage.setItem('imgbb_key', e.target.value); }} placeholder="Paste ImgBB key..." className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm outline-none focus:border-indigo-500" />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Callback URL</label>
+                <input type="text" value={callbackUrl} onChange={e => { setCallbackUrl(e.target.value); localStorage.setItem('kie_callback_url', e.target.value); }} placeholder="https://your-domain.com/callback" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm outline-none focus:border-indigo-500" />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <main className="max-w-7xl mx-auto px-6 mt-8 grid grid-cols-1 lg:grid-cols-12 gap-8 pb-20">
+        {/* Left Sidebar: Controls */}
         <div className="lg:col-span-4 space-y-6">
-          <div className="bg-surface rounded-[2.5rem] p-7 border border-slate-700/50 shadow-2xl sticky top-24">
-            <div className="space-y-8">
-              <ImageUploader 
-                label="Person (Face)" 
-                images={subjectImages} 
-                onImagesUpload={imgs => handleImageUpload(imgs, setSubjectImages)} 
-                onRemove={id => setSubjectImages(p => p.filter(i => i.id !== id))} 
-                icon={<UserIcon className="w-4 h-4 text-purple-400" />} 
-                maxCount={1} 
-              />
+          <div className="bg-surface rounded-2xl p-6 border border-slate-700/50 shadow-xl sticky top-24">
+            <div className="space-y-6">
+              <ImageUploader label="Subject Photo (Face)" images={subjectImages} onImagesUpload={imgs => handleImageUpload(imgs, setSubjectImages)} onRemove={id => setSubjectImages(p => p.filter(i => i.id !== id))} icon={<UserIcon className="w-4 h-4 text-purple-400" />} maxCount={1} />
               
-              <div className="space-y-3">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                  <WandIcon className="w-3.5 h-3.5" /> Режим генерации
-                </label>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Generation Mode</label>
                 <div className="grid grid-cols-4 gap-2">
                   {[
                     { id: GenerationMode.MATCH_STYLE, icon: <ImageIcon className="w-5 h-5" />, label: 'Style' },
-                    { id: GenerationMode.CUSTOM_SCENE, icon: <WandIcon className="w-5 h-5" />, label: 'Scene' },
+                    { id: GenerationMode.CUSTOM_SCENE, icon: <WandIcon className="w-5 h-5" />, label: 'Custom' },
                     { id: GenerationMode.CHARACTER_SHEET, icon: <GridIcon className="w-5 h-5" />, label: 'Angles' },
                     { id: GenerationMode.RANDOM_CREATIVE, icon: <SparklesIcon className="w-5 h-5" />, label: 'Random' }
                   ].map(m => (
-                    <button 
-                      key={m.id} 
-                      onClick={() => setGenMode(m.id as GenerationMode)}
-                      title={m.label}
-                      className={`aspect-square rounded-2xl border transition-all flex items-center justify-center ${
-                        genMode === m.id 
-                        ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-600/20 scale-105' 
-                        : 'bg-slate-900 border-slate-700 text-slate-500 hover:border-slate-500'
-                      }`}
-                    >
+                    <button key={m.id} onClick={() => setGenMode(m.id as GenerationMode)} title={m.label} className={`aspect-square rounded-xl border transition-all flex items-center justify-center ${genMode === m.id ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg' : 'bg-slate-900 border-slate-700 text-slate-500 hover:border-slate-500'}`}>
                       {m.icon}
                     </button>
                   ))}
                 </div>
               </div>
 
-              {genMode === GenerationMode.MATCH_STYLE && (
-                <ImageUploader 
-                  label="Style Reference" 
-                  images={styleImages} 
-                  onImagesUpload={imgs => handleImageUpload(imgs, setStyleImages)} 
-                  onRemove={id => setStyleImages(p => p.filter(i => i.id !== id))} 
-                  icon={<ImageIcon className="w-4 h-4 text-sky-400" />} 
-                />
-              )}
-
-              {genMode === GenerationMode.CUSTOM_SCENE && (
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Описание сцены</label>
-                  <textarea 
-                    value={customSceneText} 
-                    onChange={e => setCustomSceneText(e.target.value)} 
-                    placeholder="Например: в костюме киберпанка под дождем..." 
-                    className="w-full h-24 bg-slate-900 border border-slate-700 rounded-2xl p-4 text-xs text-slate-300 outline-none focus:border-indigo-500 transition-colors resize-none" 
-                  />
-                </div>
-              )}
+              {genMode === GenerationMode.MATCH_STYLE && <ImageUploader label="Style Reference" images={styleImages} onImagesUpload={imgs => handleImageUpload(imgs, setStyleImages)} onRemove={id => setStyleImages(p => p.filter(i => i.id !== id))} icon={<ImageIcon className="w-4 h-4 text-sky-400" />} />}
+              {genMode === GenerationMode.CUSTOM_SCENE && <textarea value={customSceneText} onChange={e => setCustomSceneText(e.target.value)} placeholder="Describe the scene..." className="w-full h-24 bg-slate-900 border border-slate-700 rounded-xl p-4 text-sm text-slate-300 outline-none focus:border-indigo-500 resize-none" />}
               
-              <div className="flex items-center justify-between p-3.5 bg-slate-900/50 rounded-2xl border border-slate-700">
-                <span className="text-[10px] font-black text-slate-400 ml-2 uppercase tracking-tighter">Варианты промтов:</span>
-                <div className="flex gap-1.5">
+              <div className="flex items-center justify-between p-3 bg-slate-900 rounded-xl border border-slate-700">
+                <span className="text-xs font-bold text-slate-400 uppercase">Quantity</span>
+                <div className="flex gap-1">
                   {[1, 3, 5].map(c => (
-                    <button 
-                      key={c} 
-                      onClick={() => setPromptCount(c)} 
-                      className={`w-9 h-9 rounded-xl text-xs font-black transition-all ${
-                        promptCount === c ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 hover:text-white'
-                      }`}
-                    >
-                      {c}
-                    </button>
+                    <button key={c} onClick={() => setPromptCount(c)} className={`w-8 h-8 rounded-lg text-xs font-bold transition-all ${promptCount === c ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-white'}`}>{c}</button>
                   ))}
                 </div>
               </div>
 
-              <button 
-                onClick={handleGenerate} 
-                disabled={loadingState === LoadingState.ANALYZING} 
-                className="w-full py-5 rounded-2xl font-black bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-xl hover:shadow-indigo-500/20 active:scale-95 transition-all disabled:opacity-50 uppercase tracking-widest text-xs"
-              >
-                {loadingState === LoadingState.ANALYZING ? 'Пробуждение алхимии...' : 'Запустить трансмутацию'}
+              <button onClick={handleGenerate} disabled={loadingState === LoadingState.ANALYZING} className="w-full py-4 rounded-xl font-bold bg-indigo-600 text-white shadow-lg hover:bg-indigo-500 active:scale-95 transition-all disabled:opacity-50">
+                {loadingState === LoadingState.ANALYZING ? 'Analysing Images...' : 'Generate Prompts'}
               </button>
-              
-              {error && (
-                <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl animate-pulse">
-                  <p className="text-[10px] text-red-400 text-center font-bold uppercase">{error}</p>
-                </div>
-              )}
+              {error && <p className="text-xs text-red-400 text-center font-medium bg-red-400/10 p-2 rounded-lg">{error}</p>}
             </div>
           </div>
         </div>
 
+        {/* Main Content: History & Results */}
         <div className="lg:col-span-8 space-y-6">
           {history.map((group, gIdx) => (
-            <div key={group.id} className="bg-surface/30 border border-slate-800/50 rounded-[2.5rem] overflow-hidden shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-500 backdrop-blur-sm">
-              <div className="bg-slate-800/20 px-8 py-4 border-b border-slate-700/30 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-2 h-2 rounded-full bg-indigo-500"></div>
-                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">
-                    {new Date(group.timestamp).toLocaleTimeString()} • {group.mode}
-                  </span>
-                </div>
+            <div key={group.id} className="bg-surface/50 border border-slate-800 rounded-2xl overflow-hidden shadow-xl animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <div className="bg-slate-800/50 px-6 py-3 border-b border-slate-700 flex items-center justify-between">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{new Date(group.timestamp).toLocaleString()} • {group.mode}</span>
               </div>
-              
-              <div className="p-8 space-y-12">
+              <div className="p-6 space-y-10">
                 {group.prompts.map((p, pi) => (
                   <div key={pi} className="space-y-6">
-                    <div className="flex flex-col md:flex-row gap-6">
-                      {p.referenceImage && (
-                        <div className="relative shrink-0">
-                          <img src={p.referenceImage} className="w-24 h-24 rounded-[1.5rem] object-cover border border-slate-700 shadow-xl" />
-                          <div className="absolute -top-2 -left-2 bg-indigo-600 text-[8px] font-black px-2 py-0.5 rounded-full shadow-lg">STYLE</div>
-                        </div>
-                      )}
-                      
-                      <div className="flex-grow bg-slate-900/40 border border-slate-800/50 rounded-3xl p-6 relative group/prompt">
-                        <div className="flex justify-between items-start mb-4">
-                          <span className="text-[10px] font-black text-indigo-500/40">ОПУС #{pi + 1}</span>
+                    <div className="flex gap-6">
+                      {p.referenceImage && <img src={p.referenceImage} className="w-20 h-20 rounded-xl object-cover border border-slate-700 shadow-md flex-shrink-0" />}
+                      <div className="flex-grow bg-slate-900/50 border border-slate-800 rounded-2xl p-5 relative">
+                        <div className="flex justify-between items-start mb-3">
+                          <span className="text-[10px] font-bold text-indigo-500 opacity-50 uppercase tracking-widest">Variation #{pi + 1}</span>
                           <div className="flex gap-2">
-                            <button 
-                              onClick={() => handleGenImage(gIdx, pi)} 
-                              disabled={p.isGenerating}
-                              className={`text-[10px] px-5 py-2 rounded-xl font-black uppercase tracking-wider transition-all flex items-center gap-2 ${
-                                p.isGenerating 
-                                ? 'bg-slate-800 text-slate-500 cursor-not-allowed' 
-                                : 'bg-indigo-600 text-white hover:bg-indigo-500 shadow-lg shadow-indigo-600/20'
-                              }`}
-                            >
-                              {p.isGenerating ? (
-                                <><span className="w-2 h-2 bg-indigo-400 rounded-full animate-pulse"></span> Поллинг...</>
-                              ) : p.generatedImageUrl ? 'Перегенерировать' : 'Создать фото'}
+                            <button onClick={() => handleGenImage(gIdx, pi)} disabled={p.isGenerating} className={`text-[10px] px-4 py-1.5 rounded-lg font-bold uppercase transition-all ${p.isGenerating ? 'bg-slate-800 text-slate-500' : 'bg-indigo-600 text-white shadow-md'}`}>
+                              {p.isGenerating ? 'Polling...' : 'Gen Photo'}
                             </button>
-                            <button 
-                              onClick={() => navigator.clipboard.writeText(p.text)} 
-                              className="p-2.5 bg-slate-800 text-slate-400 hover:text-white rounded-xl transition-colors"
-                            >
-                              <CopyIcon className="w-4 h-4" />
-                            </button>
+                            <button onClick={() => navigator.clipboard.writeText(p.text)} className="p-2 bg-slate-800 text-slate-400 hover:text-white rounded-lg"><CopyIcon className="w-4 h-4" /></button>
                           </div>
                         </div>
-                        <p className="text-sm leading-relaxed text-slate-300 font-medium selection:bg-indigo-500/40 italic">"{p.text}"</p>
-                        
+                        <p className="text-sm leading-relaxed text-slate-300 font-medium">{p.text}</p>
                         {p.isGenerating && (
-                           <div className="mt-4 flex flex-col gap-2">
-                             <div className="flex items-center gap-3 text-[9px] text-indigo-400 font-bold bg-indigo-500/5 p-2 rounded-xl border border-indigo-500/10">
-                                <div className="w-2 h-2 rounded-full bg-indigo-500 animate-ping"></div>
-                                ID ЗАДАЧИ: {p.taskId}
-                             </div>
-                             <p className="text-[8px] text-slate-600 ml-2">Ожидание ответа от сервера (до 2-3 минут)...</p>
-                           </div>
+                          <div className="mt-3 text-[9px] text-slate-500 font-mono animate-pulse">Waiting for server response... (ID: {p.taskId?.slice(0, 12)}...)</div>
                         )}
-                        
-                        {p.error && (
-                          <div className="mt-4 p-3 bg-red-400/10 border border-red-400/20 rounded-xl">
-                            <p className="text-[10px] text-red-400 font-bold">Ошибка: {p.error}</p>
-                            <button onClick={() => handleGenImage(gIdx, pi)} className="text-[8px] mt-1 text-indigo-400 underline uppercase">Попробовать еще раз</button>
-                          </div>
-                        )}
+                        {p.error && <p className="text-[10px] text-red-400 mt-2 font-bold bg-red-400/5 p-2 rounded">Error: {p.error}</p>}
                       </div>
                     </div>
-
                     {p.generatedImageUrl && (
-                      <div className="md:ml-32 max-w-lg rounded-[2.5rem] overflow-hidden border border-slate-700 shadow-[0_30px_60px_rgba(0,0,0,0.6)] group relative aspect-square bg-slate-900">
-                        <img src={p.generatedImageUrl} className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-110" />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 flex flex-col justify-end p-8">
-                          <div className="flex gap-3">
-                            <a 
-                              href={p.generatedImageUrl} 
-                              target="_blank" 
-                              rel="noreferrer" 
-                              className="flex-grow py-4 bg-white text-black text-xs font-black uppercase text-center rounded-2xl hover:bg-slate-200 transition-colors"
-                            >
-                              Открыть оригинал
-                            </a>
-                            <button 
-                              onClick={() => navigator.clipboard.writeText(p.generatedImageUrl!)}
-                              className="p-4 bg-slate-800 text-white rounded-2xl hover:bg-slate-700"
-                            >
-                              <CopyIcon className="w-5 h-5" />
-                            </button>
-                          </div>
+                      <div className="ml-26 max-w-sm rounded-2xl overflow-hidden border border-slate-700 shadow-2xl group relative aspect-square bg-slate-900">
+                        <img src={p.generatedImageUrl} className="w-full h-full object-cover" />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                          <a href={p.generatedImageUrl} target="_blank" rel="noreferrer" className="px-6 py-2 bg-white text-black text-xs font-bold uppercase rounded-lg">View HQ Original</a>
                         </div>
-                        <div className="absolute top-6 right-6 bg-indigo-600 text-white text-[10px] font-black px-4 py-1.5 rounded-full shadow-2xl ring-4 ring-indigo-600/20">READY</div>
                       </div>
                     )}
                   </div>
@@ -430,11 +300,10 @@ const App: React.FC = () => {
               </div>
             </div>
           ))}
-          
           {history.length === 0 && (
-            <div className="h-96 flex flex-col items-center justify-center text-slate-800 border-4 border-dashed border-slate-800/30 rounded-[4rem]">
-              <SparklesIcon className="w-20 h-20 mb-8 opacity-5" />
-              <p className="text-xl font-black uppercase tracking-[0.3em] opacity-10 italic">Пространство алхимии</p>
+            <div className="h-64 flex flex-col items-center justify-center text-slate-700 border-2 border-dashed border-slate-800 rounded-2xl">
+              <SparklesIcon className="w-12 h-12 mb-4 opacity-10" />
+              <p className="text-sm font-bold uppercase tracking-widest opacity-20">Awaiting Your Alchemy</p>
             </div>
           )}
         </div>
