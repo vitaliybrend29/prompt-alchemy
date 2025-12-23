@@ -33,9 +33,13 @@ const App: React.FC = () => {
   
   const [selectedPrompts, setSelectedPrompts] = useState<Set<string>>(new Set());
 
+  // Обновленный мемо-список для Хранилища: теперь возвращает объекты с URL и режимом
   const allGeneratedImages = useMemo(() => {
     return history.flatMap(group => 
-      group.prompts.flatMap(p => p.generatedImageUrls || [])
+      group.prompts.flatMap(p => (p.generatedImageUrls || []).map(url => ({
+        url,
+        mode: group.mode
+      })))
     );
   }, [history]);
 
@@ -267,18 +271,27 @@ const App: React.FC = () => {
                 </div>
               ) : (
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
-                  {allGeneratedImages.map((url, idx) => (
+                  {allGeneratedImages.map((item, idx) => (
                     <div key={idx} className="relative aspect-square group/vault-img rounded-[2rem] overflow-hidden bg-black border border-white/5 shadow-2xl transition-all hover:border-indigo-500/50 hover:shadow-indigo-500/10">
-                      <img src={url} className="w-full h-full object-cover transition-all duration-1000 group-hover/vault-img:scale-110" />
+                      <img src={item.url} className="w-full h-full object-cover transition-all duration-1000 group-hover/vault-img:scale-110" />
+                      
+                      {/* Badge showing the model name in Vault */}
+                      <div className="absolute top-3 left-3 px-2 py-1 bg-black/50 backdrop-blur-md rounded-lg border border-white/10 flex items-center gap-1.5 z-10 pointer-events-none opacity-80 group-hover/vault-img:opacity-100 transition-opacity">
+                        <div className={`w-1 h-1 rounded-full animate-pulse ${item.mode === GenerationMode.NSFC ? 'bg-red-500 shadow-[0_0_5px_rgba(239,68,68,0.8)]' : 'bg-indigo-500 shadow-[0_0_5px_rgba(99,102,241,0.8)]'}`}></div>
+                        <span className="text-[7px] font-black uppercase tracking-[0.2em] text-white/80">
+                          {item.mode === GenerationMode.NSFC ? 'SeeDream 4.5' : 'Nano Banana'}
+                        </span>
+                      </div>
+
                       <div className="absolute inset-0 bg-black/70 opacity-0 group-hover/vault-img:opacity-100 transition-all flex items-center justify-center gap-3 backdrop-blur-sm">
                         <button 
-                          onClick={() => setPreviewImage(url)} 
+                          onClick={() => setPreviewImage(item.url)} 
                           className="p-4 bg-white text-black rounded-full hover:scale-110 active:scale-90 transition-all shadow-xl"
                         >
                           <PlayIcon className="w-5 h-5 fill-current" />
                         </button>
                         <button 
-                          onClick={() => handleDownload(url)} 
+                          onClick={() => handleDownload(item.url)} 
                           className="p-4 bg-indigo-600 text-white rounded-full hover:scale-110 active:scale-90 transition-all shadow-xl"
                         >
                           <DownloadIcon className="w-5 h-5" />
