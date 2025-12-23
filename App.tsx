@@ -27,6 +27,9 @@ const App: React.FC = () => {
   const [loadingState, setLoadingState] = useState<LoadingState>(LoadingState.IDLE);
   const [error, setError] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  
+  // Состояние для мульти-выбора
+  const [selectedPrompts, setSelectedPrompts] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const saved = localStorage.getItem('alchemy_v11_history');
@@ -49,9 +52,21 @@ const App: React.FC = () => {
     localStorage.setItem('alchemy_v11_history', JSON.stringify(history.slice(0, 50)));
   }, [history]);
 
-  /**
-   * Скачивание изображения на устройство
-   */
+  const togglePromptSelection = (id: string) => {
+    const next = new Set(selectedPrompts);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedPrompts(next);
+  };
+
+  const selectAllInGroup = (groupId: string) => {
+    const group = history.find(g => g.id === groupId);
+    if (!group) return;
+    const next = new Set(selectedPrompts);
+    group.prompts.forEach(p => next.add(p.id));
+    setSelectedPrompts(next);
+  };
+
   const handleDownload = async (url: string) => {
     try {
       const response = await fetch(url);
@@ -70,14 +85,10 @@ const App: React.FC = () => {
     }
   };
 
-  /**
-   * Возобновление слежения за задачей
-   */
   const resumeMonitoringProcess = async (groupId: string, promptId: string, taskId: string) => {
     updatePromptUI(groupId, promptId, { isGenerating: true, taskId });
     try {
       const urls = await monitorTaskProgress(taskId);
-      // При получении новых URL - добавляем их в массив, а не заменяем
       updatePromptUI(groupId, promptId, (prev) => ({
         isGenerating: false,
         generatedImageUrls: [...(prev.generatedImageUrls || []), ...urls]
@@ -87,9 +98,6 @@ const App: React.FC = () => {
     }
   };
 
-  /**
-   * Универсальная функция обновления промпта, поддерживает функцию-обработчик для объединения данных
-   */
   const updatePromptUI = (
     groupId: string, 
     promptId: string, 
@@ -113,6 +121,9 @@ const App: React.FC = () => {
       if (group.id !== groupId) return group;
       return { ...group, prompts: group.prompts.filter(p => p.id !== promptId) };
     }).filter(group => group.prompts.length > 0));
+    const next = new Set(selectedPrompts);
+    next.delete(promptId);
+    setSelectedPrompts(next);
   };
 
   const handleIdentityImagesUpload = async (newImages: UploadedImage[]) => {
@@ -172,11 +183,50 @@ const App: React.FC = () => {
     }
   };
 
+  const bulkRenderSelected = async () => {
+    const promptsToRender: {groupId: string, promptId: string}[] = [];
+    history.forEach(group => {
+      group.prompts.forEach(p => {
+        if (selectedPrompts.has(p.id) && !p.isGenerating) {
+          promptsToRender.push({ groupId: group.id, promptId: p.id });
+        }
+      });
+    });
+
+    for (const item of promptsToRender) {
+      executeImageRender(item.groupId, item.promptId);
+    }
+    setSelectedPrompts(new Set()); // Сброс выбора после запуска
+  };
+
   return (
     <div className="min-h-screen bg-[#06080d] text-slate-300 font-sans">
       {previewImage && (
         <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setPreviewImage(null)}>
           <img src={previewImage} className="max-w-full max-h-full rounded-lg shadow-2xl animate-in zoom-in-95 duration-300" />
+        </div>
+      )}
+
+      {/* Floating Bulk Action Bar */}
+      {selectedPrompts.size > 0 && (
+        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 bg-indigo-600 px-6 py-4 rounded-full shadow-2xl flex items-center gap-8 animate-in slide-in-from-bottom-10 duration-300">
+          <span className="text-xs font-black uppercase tracking-widest text-white whitespace-nowrap">
+            {selectedPrompts.size} Prompts Selected
+          </span>
+          <div className="flex gap-2">
+            <button 
+              onClick={bulkRenderSelected}
+              className="bg-white text-indigo-600 px-6 py-2 rounded-full text-[10px] font-black uppercase tracking-widest hover:scale-105 active:scale-95 transition-all"
+            >
+              Bulk Render ({qualityLevel})
+            </button>
+            <button 
+              onClick={() => setSelectedPrompts(new Set())}
+              className="bg-black/20 text-white/80 px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest hover:bg-black/40 transition-all"
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       )}
 
@@ -211,12 +261,12 @@ const App: React.FC = () => {
 
             {genMode === GenerationMode.MATCH_STYLE && (
               <ImageUploader 
-                label="2. Style Reference" 
+                label="2. Style References" 
                 images={styleImages} 
-                onImagesUpload={imgs => setStyleImages(p => [...p, ...imgs].slice(0, 3))} 
+                onImagesUpload={imgs => setStyleImages(p => [...p, ...imgs].slice(0, 5))} 
                 onRemove={id => setStyleImages(p => p.filter(i => i.id !== id))} 
                 icon={<ImageIcon className="w-4 h-4 text-emerald-400" />} 
-                maxCount={3}
+                maxCount={5}
               />
             )}
 
@@ -243,7 +293,6 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            {/* Поле для Custom Scene Text */}
             {genMode === GenerationMode.CUSTOM_SCENE && (
               <div className="space-y-2 animate-in fade-in slide-in-from-top-2 duration-300">
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] block">Scene Description</label>
@@ -316,14 +365,35 @@ const App: React.FC = () => {
               <div className="flex items-center gap-6 px-4">
                 <span className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">{new Date(group.timestamp).toLocaleTimeString()}</span>
                 <div className="h-px flex-grow bg-white/5"></div>
+                <button 
+                  onClick={() => selectAllInGroup(group.id)}
+                  className="text-[9px] font-black text-indigo-400 uppercase tracking-widest hover:text-white transition-colors"
+                >
+                  Select All
+                </button>
                 <span className="text-[9px] font-black text-slate-600 uppercase tracking-[0.3em]">{group.mode}</span>
               </div>
 
               <div className="space-y-6">
                 {group.prompts.map(p => (
-                  <div key={p.id} className="bg-[#0e111a]/40 border border-white/5 rounded-[2.5rem] p-8 hover:bg-[#0e111a] transition-all group/card">
+                  <div 
+                    key={p.id} 
+                    className={`bg-[#0e111a]/40 border rounded-[2.5rem] p-8 transition-all group/card relative ${
+                      selectedPrompts.has(p.id) ? 'border-indigo-500/50 bg-[#0e111a]' : 'border-white/5 hover:bg-[#0e111a]'
+                    }`}
+                  >
+                    {/* Checkbox for selection */}
+                    <div 
+                      onClick={() => togglePromptSelection(p.id)}
+                      className={`absolute top-6 left-6 w-5 h-5 rounded-full border-2 cursor-pointer transition-all z-10 flex items-center justify-center ${
+                        selectedPrompts.has(p.id) ? 'bg-indigo-600 border-indigo-400' : 'border-white/20 bg-black/40'
+                      }`}
+                    >
+                      {selectedPrompts.has(p.id) && <div className="w-2 h-2 bg-white rounded-full"></div>}
+                    </div>
+
                     <div className="flex flex-col md:flex-row gap-8">
-                      <div className="w-24 h-24 rounded-2xl overflow-hidden border border-white/10 shrink-0 bg-black shadow-inner">
+                      <div className="w-24 h-24 rounded-2xl overflow-hidden border border-white/10 shrink-0 bg-black shadow-inner ml-8 md:ml-0">
                         {p.referenceImage ? <img src={p.referenceImage} className="w-full h-full object-cover grayscale opacity-40 group-hover/card:opacity-60 transition-opacity" /> : <div className="w-full h-full flex items-center justify-center opacity-10"><ImageIcon className="w-8 h-8" /></div>}
                       </div>
 
