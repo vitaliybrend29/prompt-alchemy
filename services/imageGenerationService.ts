@@ -70,19 +70,37 @@ export const pollTaskStatus = async (taskId: string): Promise<string> => {
   throw new Error("Polling timeout.");
 };
 
-export const createTask = async (prompt: string, faceUrls: string[], aspectRatio: string = "1:1", callbackUrl?: string): Promise<string> => {
+export const createTask = async (
+  prompt: string, 
+  faceUrls: string[], 
+  aspectRatio: string = "1:1", 
+  usePro: boolean = false,
+  callbackUrl?: string
+): Promise<string> => {
   const apiKey = getApiKey();
   if (!apiKey) throw new Error("API KEY missing");
 
+  // Для Pro модели используем nano-banana-pro и специфичные поля
   const payload: any = {
-    model: "google/nano-banana-edit",
-    input: {
+    model: usePro ? "nano-banana-pro" : "google/nano-banana-edit",
+    input: usePro ? {
       prompt,
-      image_urls: faceUrls, // Теперь передаем массив всех фото модели
+      aspect_ratio: aspectRatio,
+      resolution: "1K",
+      output_format: "png"
+      // Если Pro версия поддерживает лица, можно добавить image_urls: faceUrls
+    } : {
+      prompt,
+      image_urls: faceUrls,
       output_format: "png",
-      image_size: aspectRatio // Передаем выбранное соотношение
+      image_size: aspectRatio
     }
   };
+
+  // Попробуем отправить лица в Pro тоже, если они есть
+  if (usePro && faceUrls.length > 0) {
+    payload.input.image_urls = faceUrls;
+  }
 
   if (callbackUrl) payload.callBackUrl = callbackUrl;
 

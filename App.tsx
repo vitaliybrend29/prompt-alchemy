@@ -4,7 +4,7 @@ import ImageUploader from './components/ImageUploader';
 import { UploadedImage, LoadingState, GenerationMode, PromptGroup, GeneratedPrompt } from './types';
 import { generatePrompts } from './services/geminiService';
 import { createTask, pollTaskStatus } from './services/imageGenerationService';
-import { WandIcon, CopyIcon, SparklesIcon, ImageIcon, UserIcon, TrashIcon, GridIcon } from './components/Icons';
+import { WandIcon, CopyIcon, SparklesIcon, ImageIcon, UserIcon, TrashIcon, GridIcon, PlayIcon } from './components/Icons';
 
 const MAX_HISTORY_ITEMS = 30;
 
@@ -37,6 +37,7 @@ const App: React.FC = () => {
   const [subjectImages, setSubjectImages] = useState<UploadedImage[]>([]);
   const [promptCount, setPromptCount] = useState<number>(3);
   const [aspectRatio, setAspectRatio] = useState<string>('1:1');
+  const [isPro, setIsPro] = useState<boolean>(false);
   const [genMode, setGenMode] = useState<GenerationMode>(GenerationMode.MATCH_STYLE);
   const [customSceneText, setCustomSceneText] = useState<string>('');
   const [history, setHistory] = useState<PromptGroup[]>([]);
@@ -188,7 +189,7 @@ const App: React.FC = () => {
       const faceUrls = group.subjectReferences;
       if (faceUrls.length === 0) throw new Error("Upload not finished.");
       
-      const taskId = await createTask(prompt.text, faceUrls, aspectRatio, callbackUrl);
+      const taskId = await createTask(prompt.text, faceUrls, aspectRatio, isPro, callbackUrl);
       resumePolling(groupIdx, promptIdx, taskId);
     } catch (err: any) {
       setError(err.message);
@@ -212,7 +213,7 @@ const App: React.FC = () => {
             </div>
             <div>
               <h1 className="text-lg font-black tracking-tighter text-white uppercase italic">Alchemist Studio</h1>
-              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none">Intelligence v7.0</p>
+              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none">Intelligence v7.1</p>
             </div>
           </div>
           <button onClick={clearHistory} className="group flex items-center gap-2 px-5 py-2 rounded-full border border-white/5 hover:border-red-500/30 transition-all">
@@ -226,8 +227,11 @@ const App: React.FC = () => {
         
         <div className="lg:col-span-4 space-y-8">
           <div className="bg-[#0f121d] rounded-3xl p-8 border border-white/5 shadow-2xl sticky top-28">
-            <h2 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-8 flex items-center gap-3">
-              <div className="w-1.5 h-1.5 rounded-full bg-indigo-500"></div> Transmutation Config
+            <h2 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-8 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-1.5 h-1.5 rounded-full bg-indigo-500"></div> Transmutation Config
+              </div>
+              {isPro && <span className="text-[9px] bg-indigo-600 text-white px-2 py-0.5 rounded-full animate-pulse">PRO ACTIVE</span>}
             </h2>
 
             <div className="space-y-10">
@@ -241,9 +245,22 @@ const App: React.FC = () => {
               />
 
               <div className="space-y-4">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                  <GridIcon className="w-4 h-4" /> Mode & Frame
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                    <GridIcon className="w-4 h-4" /> Mode & Frame
+                  </label>
+                  
+                  {/* PRO TOGGLE */}
+                  <button 
+                    onClick={() => setIsPro(!isPro)}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all ${
+                      isPro ? 'bg-indigo-600/20 border-indigo-500 text-indigo-400' : 'bg-[#161a27] border-white/5 text-slate-500'
+                    }`}
+                  >
+                    <SparklesIcon className={`w-3.5 h-3.5 ${isPro ? 'text-indigo-400 animate-pulse' : ''}`} />
+                    <span className="text-[9px] font-black uppercase">Pro Engine</span>
+                  </button>
+                </div>
                 
                 <div className="grid grid-cols-4 gap-2">
                   {[
@@ -335,7 +352,9 @@ const App: React.FC = () => {
                   <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{new Date(group.timestamp).toLocaleTimeString()}</span>
                 </div>
                 <div className="h-px flex-grow bg-white/5"></div>
-                <span className="text-[10px] font-black text-indigo-500 uppercase tracking-[0.3em]">{group.mode}</span>
+                <div className="flex items-center gap-3">
+                  <span className="text-[10px] font-black text-indigo-500 uppercase tracking-[0.3em]">{group.mode}</span>
+                </div>
               </div>
 
               <div className="space-y-6">
@@ -353,7 +372,10 @@ const App: React.FC = () => {
                     <div className="flex-grow flex flex-col justify-between py-1">
                       <div className="space-y-4">
                         <div className="flex items-center justify-between">
-                          <h3 className="text-[11px] font-black text-indigo-500 uppercase tracking-[0.2em]">Synthesis Result 0{pi+1}</h3>
+                          <div className="flex items-center gap-3">
+                            <h3 className="text-[11px] font-black text-indigo-500 uppercase tracking-[0.2em]">Synthesis Result 0{pi+1}</h3>
+                            {isPro && <span className="text-[8px] bg-indigo-600/20 text-indigo-400 px-2 py-0.5 rounded border border-indigo-500/30 font-black">PRO</span>}
+                          </div>
                           <div className="flex gap-2">
                             <button onClick={() => navigator.clipboard.writeText(p.text)} className="p-2.5 bg-white/5 hover:bg-white/10 text-slate-500 hover:text-white rounded-xl transition-all" title="Copy Prompt">
                               <CopyIcon className="w-4 h-4" />
@@ -365,7 +387,7 @@ const App: React.FC = () => {
                                 p.isGenerating ? 'bg-slate-800 text-slate-600 cursor-not-allowed' : 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20 hover:scale-105 active:scale-95'
                               }`}
                             >
-                              {p.isGenerating ? 'Rendering...' : 'Render Image'}
+                              {p.isGenerating ? 'Rendering...' : `Render ${isPro ? 'Pro' : ''}`}
                             </button>
                           </div>
                         </div>
@@ -404,7 +426,7 @@ const App: React.FC = () => {
                           {p.isGenerating ? (
                             <div className="flex flex-col items-center gap-4">
                               <div className="w-10 h-10 border-2 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin"></div>
-                              <span className="text-[8px] font-black uppercase tracking-[0.3em] text-indigo-500 animate-pulse">Forging Visuals...</span>
+                              <span className="text-[8px] font-black uppercase tracking-[0.3em] text-indigo-500 animate-pulse">Forging {isPro ? 'Pro' : ''} Visuals...</span>
                             </div>
                           ) : (
                             <div className="flex flex-col items-center gap-3 opacity-20">
