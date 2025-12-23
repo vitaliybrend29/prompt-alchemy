@@ -7,7 +7,8 @@ export default defineConfig({
   define: {
     'process.env.API_KEY': JSON.stringify(process.env.API_KEY),
     'process.env.KIE_API_KEY': JSON.stringify(process.env.KIE_API_KEY),
-    'process.env.IMGBB_API_KEY': JSON.stringify(process.env.IMGBB_API_KEY)
+    'process.env.IMGBB_API_KEY': JSON.stringify(process.env.IMGBB_API_KEY),
+    'process.env.SITE_PASSWORD': JSON.stringify(process.env.SITE_PASSWORD)
   },
   server: {
     port: 3000

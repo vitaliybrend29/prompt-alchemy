@@ -17,6 +17,12 @@ const ASPECT_RATIOS = [
 ];
 
 const App: React.FC = () => {
+  // Authentication Logic
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [passInput, setPassInput] = useState<string>('');
+  const [authError, setAuthError] = useState<boolean>(false);
+  const sitePassword = process.env.SITE_PASSWORD;
+
   const [styleImages, setStyleImages] = useState<UploadedImage[]>([]);
   const [subjectImages, setSubjectImages] = useState<UploadedImage[]>([]);
   const [aspectRatio, setAspectRatio] = useState<string>('1:1');
@@ -33,7 +39,30 @@ const App: React.FC = () => {
   
   const [selectedPrompts, setSelectedPrompts] = useState<Set<string>>(new Set());
 
-  // Обновленный мемо-список для Хранилища: теперь возвращает объекты с URL и режимом
+  // Check auth on mount
+  useEffect(() => {
+    if (!sitePassword || sitePassword === 'undefined' || sitePassword === '') {
+      setIsAuthenticated(true);
+    } else {
+      const savedAuth = sessionStorage.getItem('alchemy_authenticated');
+      if (savedAuth === sitePassword) {
+        setIsAuthenticated(true);
+      }
+    }
+  }, [sitePassword]);
+
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (passInput === sitePassword) {
+      sessionStorage.setItem('alchemy_authenticated', sitePassword);
+      setIsAuthenticated(true);
+      setAuthError(false);
+    } else {
+      setAuthError(true);
+      setTimeout(() => setAuthError(false), 2000);
+    }
+  };
+
   const allGeneratedImages = useMemo(() => {
     return history.flatMap(group => 
       group.prompts.flatMap(p => (p.generatedImageUrls || []).map(url => ({
@@ -221,6 +250,60 @@ const App: React.FC = () => {
     }
     setSelectedPrompts(new Set()); 
   };
+
+  // If not authenticated, show the login gate
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-[#06080d] flex items-center justify-center p-6">
+        <div className={`max-w-md w-full bg-[#0e111a] border rounded-[2.5rem] p-10 shadow-2xl transition-all duration-300 ${authError ? 'border-red-500 animate-shake' : 'border-white/10'}`}>
+          <div className="flex flex-col items-center mb-8">
+            <div className="p-4 bg-indigo-600 rounded-3xl mb-6 shadow-xl shadow-indigo-600/20">
+              <SparklesIcon className="w-8 h-8 text-white" />
+            </div>
+            <h1 className="text-xl font-black uppercase tracking-[0.3em] text-white italic text-center leading-tight">Alchemist Gate</h1>
+            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-2">Authentication Required</p>
+          </div>
+
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div className="relative">
+              <input 
+                type="password"
+                value={passInput}
+                onChange={(e) => setPassInput(e.target.value)}
+                placeholder="Enter Secret Code"
+                className="w-full bg-black/40 border border-white/5 rounded-2xl p-5 text-center text-sm font-black tracking-[0.5em] text-white focus:border-indigo-500 outline-none transition-all placeholder:tracking-normal placeholder:font-normal placeholder:text-slate-600"
+                autoFocus
+              />
+            </div>
+            <button 
+              type="submit"
+              className="w-full py-5 bg-white text-black rounded-full font-black text-xs uppercase tracking-[0.3em] hover:bg-indigo-600 hover:text-white transition-all active:scale-95 shadow-xl"
+            >
+              Transmute
+            </button>
+          </form>
+          
+          {authError && (
+            <p className="text-center text-[10px] font-black uppercase text-red-500 mt-6 tracking-widest animate-pulse">Incorrect Access Key</p>
+          )}
+          
+          <div className="mt-10 pt-8 border-t border-white/5 flex flex-col items-center gap-2 opacity-30">
+             <span className="text-[8px] font-black uppercase tracking-[0.2em]">Engine v1.1.2 Power-Up</span>
+             <span className="text-[7px] font-medium italic">Restricted Core Access</span>
+          </div>
+        </div>
+
+        <style>{`
+          @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-8px); }
+            75% { transform: translateX(8px); }
+          }
+          .animate-shake { animation: shake 0.2s cubic-bezier(.36,.07,.19,.97) both; }
+        `}</style>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#06080d] text-slate-300 font-sans">
