@@ -1,10 +1,10 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import ImageUploader from './components/ImageUploader';
 import { UploadedImage, LoadingState, GenerationMode, PromptGroup, GeneratedPrompt } from './types';
 import { generatePrompts } from './services/geminiService';
 import { startImageGenerationTask, monitorTaskProgress } from './services/imageGenerationService';
-import { WandIcon, CopyIcon, SparklesIcon, ImageIcon, UserIcon, TrashIcon, GridIcon, PlayIcon, DownloadIcon, SettingsIcon } from './components/Icons';
+import { WandIcon, CopyIcon, SparklesIcon, ImageIcon, UserIcon, TrashIcon, GridIcon, PlayIcon, DownloadIcon, XIcon } from './components/Icons';
 
 type ResolutionType = "Standard" | "1K" | "2K" | "4K";
 
@@ -32,12 +32,23 @@ const App: React.FC = () => {
   
   const [selectedPrompts, setSelectedPrompts] = useState<Set<string>>(new Set());
 
-  // Вычисляем все сгенерированные URL для галереи
   const allGeneratedImages = useMemo(() => {
     return history.flatMap(group => 
       group.prompts.flatMap(p => p.generatedImageUrls || [])
     );
   }, [history]);
+
+  // Обработка Esc для закрытия модалок
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setPreviewImage(null);
+        setShowVault(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   useEffect(() => {
     const saved = localStorage.getItem('alchemy_v11_history');
@@ -211,54 +222,66 @@ const App: React.FC = () => {
     <div className="min-h-screen bg-[#06080d] text-slate-300 font-sans">
       {/* Full Preview Modal */}
       {previewImage && (
-        <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setPreviewImage(null)}>
-          <img src={previewImage} className="max-w-full max-h-full rounded-lg shadow-2xl animate-in zoom-in-95 duration-300 border border-white/10" />
+        <div className="fixed inset-0 z-[110] bg-black/98 flex items-center justify-center p-4 backdrop-blur-md" onClick={() => setPreviewImage(null)}>
+          <button className="absolute top-8 right-8 text-white/50 hover:text-white transition-colors">
+            <XIcon className="w-8 h-8" />
+          </button>
+          <img 
+            src={previewImage} 
+            className="max-w-full max-h-full rounded-2xl shadow-2xl animate-in zoom-in-95 duration-300 border border-white/10" 
+            onClick={(e) => e.stopPropagation()}
+          />
         </div>
       )}
 
-      {/* Artifact Vault Modal (Gallery) */}
+      {/* Artifact Vault Modal */}
       {showVault && (
-        <div className="fixed inset-0 z-[90] bg-black/98 flex flex-col p-8 animate-in fade-in duration-300">
-          <div className="max-w-7xl mx-auto w-full flex-grow flex flex-col">
-            <div className="flex items-center justify-between mb-10">
-              <div className="flex items-center gap-4">
-                <div className="p-3 bg-indigo-600/20 rounded-2xl border border-indigo-500/30">
-                  <GridIcon className="w-6 h-6 text-indigo-400" />
+        <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-xl flex items-center justify-center p-4 md:p-10 animate-in fade-in duration-300" onClick={() => setShowVault(false)}>
+          <div 
+            className="bg-[#0e111a] border border-white/10 w-full max-w-7xl h-full max-h-[90vh] rounded-[3rem] overflow-hidden flex flex-col shadow-[0_0_100px_rgba(0,0,0,0.8)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Vault Header */}
+            <div className="px-10 py-8 border-b border-white/5 flex items-center justify-between bg-black/20">
+              <div className="flex items-center gap-5">
+                <div className="p-3.5 bg-indigo-600/10 rounded-2xl border border-indigo-500/20 text-indigo-400">
+                  <GridIcon className="w-6 h-6" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-black uppercase tracking-widest text-white italic leading-none mb-1">Artifact Vault</h2>
-                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{allGeneratedImages.length} Transmutations Recorded</p>
+                  <h2 className="text-xl font-black uppercase tracking-widest text-white italic leading-none mb-1.5">Artifact Vault</h2>
+                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{allGeneratedImages.length} Saved Generations</p>
                 </div>
               </div>
               <button 
                 onClick={() => setShowVault(false)}
-                className="bg-white/5 hover:bg-white/10 text-white w-12 h-12 rounded-full flex items-center justify-center transition-all border border-white/5"
+                className="bg-white/5 hover:bg-white/10 text-white w-14 h-14 rounded-full flex items-center justify-center transition-all border border-white/5 group"
               >
-                <TrashIcon className="w-5 h-5 rotate-45" /> {/* Using TrashIcon rotated as close for simplicity in existing Icons.tsx */}
+                <XIcon className="w-6 h-6 group-hover:scale-110 transition-transform" />
               </button>
             </div>
 
-            <div className="flex-grow overflow-y-auto pr-4 scroll-smooth">
+            {/* Vault Grid */}
+            <div className="flex-grow overflow-y-auto p-10 custom-scrollbar">
               {allGeneratedImages.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center opacity-20">
-                  <ImageIcon className="w-20 h-20 mb-6" />
-                  <span className="text-xs font-black uppercase tracking-[0.5em]">Vault is empty</span>
+                  <ImageIcon className="w-24 h-24 mb-6" />
+                  <span className="text-xs font-black uppercase tracking-[0.6em]">No artifacts found</span>
                 </div>
               ) : (
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 pb-20">
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
                   {allGeneratedImages.map((url, idx) => (
-                    <div key={idx} className="relative aspect-square group/vault-img rounded-[2rem] overflow-hidden bg-black border border-white/5 shadow-2xl transition-all hover:border-indigo-500/50">
-                      <img src={url} className="w-full h-full object-cover transition-transform duration-700 group-hover/vault-img:scale-110" />
-                      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover/vault-img:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                    <div key={idx} className="relative aspect-square group/vault-img rounded-[2rem] overflow-hidden bg-black border border-white/5 shadow-2xl transition-all hover:border-indigo-500/50 hover:shadow-indigo-500/10">
+                      <img src={url} className="w-full h-full object-cover transition-all duration-1000 group-hover/vault-img:scale-110" />
+                      <div className="absolute inset-0 bg-black/70 opacity-0 group-hover/vault-img:opacity-100 transition-all flex items-center justify-center gap-3 backdrop-blur-sm">
                         <button 
                           onClick={() => setPreviewImage(url)} 
-                          className="p-3 bg-indigo-600 rounded-full text-white hover:scale-110 active:scale-90 transition-all shadow-lg"
+                          className="p-4 bg-white text-black rounded-full hover:scale-110 active:scale-90 transition-all shadow-xl"
                         >
                           <PlayIcon className="w-5 h-5 fill-current" />
                         </button>
                         <button 
                           onClick={() => handleDownload(url)} 
-                          className="p-3 bg-emerald-600 rounded-full text-white hover:scale-110 active:scale-90 transition-all shadow-lg"
+                          className="p-4 bg-indigo-600 text-white rounded-full hover:scale-110 active:scale-90 transition-all shadow-xl"
                         >
                           <DownloadIcon className="w-5 h-5" />
                         </button>
