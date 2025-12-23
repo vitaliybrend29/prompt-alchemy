@@ -3,9 +3,9 @@
  * Сервис для генерации изображений через Kie.ai API
  */
 
-// Исправленный базовый URL: убираем лишний /api, так как поддомен уже api.kie.ai
-const KIE_API_BASE = "https://api.kie.ai/v1";
-const KIE_API_JOBS = `${KIE_API_BASE}/jobs`;
+const KIE_API_BASE = "https://api.kie.ai/api/v1/jobs";
+const CREATE_TASK_URL = `${KIE_API_BASE}/createTask`;
+const QUERY_TASK_URL = `${KIE_API_BASE}/queryTask`;
 
 // Безопасное получение ключа
 const getApiKey = () => {
@@ -16,13 +16,14 @@ const getApiKey = () => {
 
 /**
  * Опрашивает статус задачи до завершения или ошибки
+ * Использует queryTask?taskId=...
  */
 const pollTaskStatus = async (taskId: string): Promise<string> => {
   const apiKey = getApiKey();
   const maxAttempts = 60; 
   let attempts = 0;
 
-  const pollUrl = `${KIE_API_JOBS}/${taskId}`;
+  const pollUrl = `${QUERY_TASK_URL}?taskId=${taskId}`;
   console.log(`Polling task status at: ${pollUrl}`);
 
   while (attempts < maxAttempts) {
@@ -34,18 +35,23 @@ const pollTaskStatus = async (taskId: string): Promise<string> => {
         },
       });
 
-      if (response.status === 404) {
-        console.warn(`Task ${taskId} not found yet (404), retrying...`);
-      } else if (!response.ok) {
-        throw new Error(`Ошибка сети (${response.status}): ${response.statusText}`);
+      if (!response.ok) {
+        if (response.status === 404) {
+          console.warn(`Task ${taskId} not found yet (404), retrying...`);
+        } else {
+          throw new Error(`Ошибка сети (${response.status}): ${response.statusText}`);
+        }
       } else {
         const result = await response.json();
+        // В Kie.ai результат обычно в result.data или result
         const taskData = result.data || result;
 
+        // Состояния в Kie.ai: 'success', 'failed', 'running', 'pending'
         if (taskData.state === "success") {
           console.log("Task success!", taskData);
           
           let resultObj = taskData.result;
+          // Иногда результат приходит как строка JSON
           if (taskData.resultJson && typeof taskData.resultJson === 'string') {
             try {
               resultObj = JSON.parse(taskData.resultJson);
@@ -61,26 +67,27 @@ const pollTaskStatus = async (taskId: string): Promise<string> => {
           throw new Error("URL результата не найден в ответе API.");
         }
 
-        if (taskData.state === "fail") {
+        if (taskData.state === "failed" || taskData.state === "fail") {
           throw new Error(taskData.failMsg || "Задача завершилась с ошибкой.");
         }
         
-        console.log(`Task state: ${taskData.state || 'pending'}...`);
+        console.log(`Task status: ${taskData.state || 'processing'}... Attempt ${attempts + 1}`);
       }
     } catch (e: any) {
       console.error("Polling error:", e);
-      throw e;
+      // Если это сетевая ошибка, пробуем еще раз, если нет - пробрасываем
+      if (!e.message.includes('Ошибка сети')) throw e;
     }
 
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    await new Promise(resolve => setTimeout(resolve, 4000));
     attempts++;
   }
 
-  throw new Error("Превышено время ожидания генерации.");
+  throw new Error("Превышено время ожидания генерации (3-4 минуты).");
 };
 
 /**
- * Генерирует изображение
+ * Генерирует изображение через createTask
  */
 export const generateGeminiImage = async (prompt: string, faceUrl: string): Promise<string> => {
   const apiKey = getApiKey();
@@ -94,15 +101,15 @@ export const generateGeminiImage = async (prompt: string, faceUrl: string): Prom
       model: "google/nano-banana-edit",
       input: {
         prompt: prompt,
+        image_urls: [faceUrl],
         output_format: "png",
-        image_size: "1:1",
-        image_urls: [faceUrl]
+        image_size: "1:1"
       }
     };
 
-    console.log("Creating Kie.ai task at:", KIE_API_JOBS);
+    console.log("Creating Kie.ai task at:", CREATE_TASK_URL);
     
-    const createResponse = await fetch(KIE_API_JOBS, {
+    const createResponse = await fetch(CREATE_TASK_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -111,28 +118,26 @@ export const generateGeminiImage = async (prompt: string, faceUrl: string): Prom
       body: JSON.stringify(payload),
     });
 
-    if (createResponse.status === 404) {
-      throw new Error("Ошибка 404: Эндпоинт не найден. Проверьте правильность URL API Kie.ai.");
+    if (!createResponse.ok) {
+      const errorText = await createResponse.text();
+      throw new Error(`Ошибка API (${createResponse.status}): ${errorText || createResponse.statusText}`);
     }
 
-    const createResult = await createResponse.json().catch(() => ({}));
+    const createResult = await createResponse.json();
     
-    if (!createResponse.ok || (createResult.code && createResult.code !== 200)) {
-      const msg = createResult.message || createResult.msg || createResponse.statusText;
-      throw new Error(msg || "Ошибка создания задачи в Kie.ai");
-    }
-
-    const taskId = createResult.data?.taskId || createResult.data?.id || createResult.taskId;
+    // В Kie.ai ID задачи может быть в data.taskId или просто taskId
+    const taskId = createResult.data?.taskId || createResult.taskId || (createResult.data?.id);
     
     if (!taskId) {
-      throw new Error("Не удалось получить ID задачи от сервера.");
+      console.error("Invalid create result:", createResult);
+      throw new Error("Не удалось получить ID задачи от сервера. Проверьте консоль.");
     }
 
     console.log("Task created successfully. ID:", taskId);
     return await pollTaskStatus(taskId);
 
   } catch (error: any) {
-    console.error("Kie.ai Creation Error:", error);
+    console.error("Kie.ai Error:", error);
     throw new Error(error.message || "Ошибка при запуске генерации.");
   }
 };
