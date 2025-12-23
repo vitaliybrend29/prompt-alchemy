@@ -8,6 +8,14 @@ import { WandIcon, CopyIcon, SparklesIcon, ImageIcon, UserIcon, TrashIcon, GridI
 
 type ResolutionType = "Standard" | "1K" | "2K" | "4K";
 
+const ASPECT_RATIOS = [
+  { id: '1:1', label: '1:1', icon: '▢' },
+  { id: '16:9', label: '16:9', icon: '▭' },
+  { id: '9:16', label: '9:16', icon: '▯' },
+  { id: '4:3', label: '4:3', icon: '▤' },
+  { id: '3:4', label: '3:4', icon: '▧' },
+];
+
 const App: React.FC = () => {
   const [styleImages, setStyleImages] = useState<UploadedImage[]>([]);
   const [subjectImages, setSubjectImages] = useState<UploadedImage[]>([]);
@@ -21,7 +29,7 @@ const App: React.FC = () => {
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   useEffect(() => {
-    const saved = localStorage.getItem('alchemy_v9_history');
+    const saved = localStorage.getItem('alchemy_v10_history');
     if (saved) {
       try {
         const parsed: PromptGroup[] = JSON.parse(saved);
@@ -33,17 +41,14 @@ const App: React.FC = () => {
             }
           });
         });
-      } catch (e) { localStorage.removeItem('alchemy_v9_history'); }
+      } catch (e) { localStorage.removeItem('alchemy_v10_history'); }
     }
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('alchemy_v9_history', JSON.stringify(history.slice(0, 50)));
+    localStorage.setItem('alchemy_v10_history', JSON.stringify(history.slice(0, 50)));
   }, [history]);
 
-  /**
-   * Возобновление слежения за генерацией (при обновлении страницы)
-   */
   const resumeMonitoringProcess = async (groupId: string, promptId: string, taskId: string) => {
     updatePromptUI(groupId, promptId, { isGenerating: true, taskId });
     try {
@@ -89,9 +94,6 @@ const App: React.FC = () => {
     }
   };
 
-  /**
-   * ГЛАВНАЯ ФУНКЦИЯ: Анализ и создание текстовых промптов
-   */
   const runPromptEngineeringProcess = async () => {
     if (subjectImages.length === 0) { setError("Please upload face photos."); return; }
     setError(null);
@@ -118,9 +120,6 @@ const App: React.FC = () => {
     }
   };
 
-  /**
-   * ГЛАВНАЯ ФУНКЦИЯ: Запуск рендеринга картинки
-   */
   const executeImageRender = async (groupId: string, promptId: string) => {
     const group = history.find(g => g.id === groupId);
     const prompt = group?.prompts.find(p => p.id === promptId);
@@ -148,7 +147,7 @@ const App: React.FC = () => {
             <div className="p-2 bg-indigo-600 rounded-lg">
               <SparklesIcon className="w-5 h-5 text-white" />
             </div>
-            <h1 className="text-sm font-black uppercase tracking-widest text-white italic">Alchemist v9</h1>
+            <h1 className="text-sm font-black uppercase tracking-widest text-white italic">Alchemist v10</h1>
           </div>
           <button onClick={() => setHistory([])} className="text-[10px] font-bold text-slate-600 hover:text-red-400 uppercase tracking-widest transition-colors flex items-center gap-2">
             <TrashIcon className="w-3 h-3" /> Reset History
@@ -162,9 +161,44 @@ const App: React.FC = () => {
         <div className="lg:col-span-4 space-y-6">
           <div className="bg-[#0e111a] border border-white/5 rounded-3xl p-8 shadow-2xl sticky top-24 space-y-10">
             
-            {/* Секция выбора режима */}
+            {/* 1. Загрузка фото (Перенесено наверх) */}
+            <div className="space-y-8">
+              <ImageUploader 
+                label="Target Identity (Faces)" 
+                images={subjectImages} 
+                onImagesUpload={handleIdentityImagesUpload} 
+                onRemove={id => setSubjectImages(p => p.filter(i => i.id !== id))} 
+                icon={<UserIcon className="w-4 h-4 text-indigo-400" />} 
+                maxCount={8} 
+              />
+
+              {genMode === GenerationMode.MATCH_STYLE && (
+                <ImageUploader 
+                  label="Style Reference" 
+                  images={styleImages} 
+                  onImagesUpload={imgs => setStyleImages(p => [...p, ...imgs].slice(0, 3))} 
+                  onRemove={id => setStyleImages(p => p.filter(i => i.id !== id))} 
+                  icon={<ImageIcon className="w-4 h-4 text-emerald-400" />} 
+                  maxCount={3}
+                />
+              )}
+
+              {genMode === GenerationMode.CUSTOM_SCENE && (
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Custom Scene Context</label>
+                  <textarea 
+                    value={customSceneText} 
+                    onChange={e => setCustomSceneText(e.target.value)}
+                    placeholder="Describe your scene context..."
+                    className="w-full bg-black/40 border border-white/5 rounded-2xl p-4 text-xs italic text-slate-300 focus:border-indigo-500 transition-colors h-24 resize-none outline-none"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* 2. Выбор режима (Теперь под фотками) */}
             <div>
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4 block">1. Select Function Mode</label>
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4 block">Select Function Mode</label>
               <div className="grid grid-cols-2 gap-3">
                 {[
                   { id: GenerationMode.MATCH_STYLE, label: 'Match Style', icon: <ImageIcon className="w-4 h-4" /> },
@@ -186,9 +220,28 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            {/* Выбор качества */}
+            {/* 3. Соотношение сторон */}
             <div>
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4 block">2. Engine Quality (Banana Pro)</label>
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4 block">Aspect Ratio</label>
+              <div className="grid grid-cols-5 gap-2">
+                {ASPECT_RATIOS.map(r => (
+                  <button
+                    key={r.id}
+                    onClick={() => setAspectRatio(r.id)}
+                    className={`flex flex-col items-center gap-1 py-3 rounded-xl border transition-all ${
+                      aspectRatio === r.id ? 'bg-indigo-600 border-indigo-400 text-white shadow-lg' : 'bg-white/5 border-white/5 text-slate-500 hover:bg-white/10'
+                    }`}
+                  >
+                    <span className="text-sm leading-none mb-1">{r.icon}</span>
+                    <span className="text-[8px] font-bold">{r.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 4. Выбор качества */}
+            <div>
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4 block">Engine Quality (Banana Pro)</label>
               <div className="grid grid-cols-4 gap-2 p-1.5 bg-black/40 rounded-2xl border border-white/5">
                 {(["Standard", "1K", "2K", "4K"] as ResolutionType[]).map(res => (
                   <button
@@ -203,35 +256,6 @@ const App: React.FC = () => {
                 ))}
               </div>
             </div>
-
-            <ImageUploader 
-              label="Target Identity" 
-              images={subjectImages} 
-              onImagesUpload={handleIdentityImagesUpload} 
-              onRemove={id => setSubjectImages(p => p.filter(i => i.id !== id))} 
-              icon={<UserIcon className="w-4 h-4 text-indigo-400" />} 
-              maxCount={8} 
-            />
-
-            {genMode === GenerationMode.MATCH_STYLE && (
-              <ImageUploader 
-                label="Style Reference" 
-                images={styleImages} 
-                onImagesUpload={imgs => setStyleImages(p => [...p, ...imgs].slice(0, 3))} 
-                onRemove={id => setStyleImages(p => p.filter(i => i.id !== id))} 
-                icon={<ImageIcon className="w-4 h-4 text-emerald-400" />} 
-                maxCount={3}
-              />
-            )}
-
-            {genMode === GenerationMode.CUSTOM_SCENE && (
-              <textarea 
-                value={customSceneText} 
-                onChange={e => setCustomSceneText(e.target.value)}
-                placeholder="Describe your scene context..."
-                className="w-full bg-black/40 border border-white/5 rounded-2xl p-4 text-xs italic text-slate-300 focus:border-indigo-500 transition-colors h-24 resize-none outline-none"
-              />
-            )}
 
             <button 
               onClick={runPromptEngineeringProcess} 
