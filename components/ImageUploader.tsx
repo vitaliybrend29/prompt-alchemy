@@ -1,6 +1,6 @@
 
 import React, { useRef } from 'react';
-import { UploadIcon, TrashIcon } from './Icons';
+import { UploadIcon, TrashIcon, SparklesIcon } from './Icons';
 import { UploadedImage } from '../types';
 
 interface ImageUploaderProps {
@@ -71,6 +71,7 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({
       previewUrl: URL.createObjectURL(file),
       base64: resized.base64,
       mimeType: resized.mimeType,
+      isUploading: false
     };
   };
 
@@ -149,6 +150,20 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({
             {images.map((img) => (
               <div key={img.id} className="relative aspect-square rounded-lg overflow-hidden border border-slate-700 group">
                 <img src={img.previewUrl} alt="Preview" className="w-full h-full object-cover" />
+                
+                {img.isUploading && (
+                  <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center text-[8px] text-white p-1 text-center font-bold">
+                    <span className="w-3 h-3 border border-white/30 border-t-white rounded-full animate-spin mb-1"></span>
+                    CONVERTING...
+                  </div>
+                )}
+
+                {img.publicUrl && !img.isUploading && (
+                  <div className="absolute top-1 right-1 bg-emerald-500 text-white rounded-full p-0.5 shadow-lg">
+                    <SparklesIcon className="w-2.5 h-2.5" />
+                  </div>
+                )}
+
                 <button 
                   onClick={(e) => { e.stopPropagation(); onRemove(img.id); }}
                   className="absolute inset-0 bg-red-500/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white"

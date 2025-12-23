@@ -5,59 +5,12 @@
 
 const KIE_API_BASE = "https://api.kie.ai/api/v1";
 const KIE_API_JOBS = `${KIE_API_BASE}/jobs`;
-const KIE_API_FILES = `${KIE_API_BASE}/files`;
 
 // Безопасное получение ключа
 const getApiKey = () => {
   const key = process.env.KIE_API_KEY || process.env.API_KEY;
   if (!key || key === 'undefined' || key === 'null') return null;
   return key;
-};
-
-/**
- * Конвертирует base64 в Blob для загрузки
- */
-const base64ToBlob = (base64: string): Blob => {
-  const parts = base64.split(';base64,');
-  const contentType = parts[0].split(':')[1];
-  const raw = window.atob(parts[1]);
-  const rawLength = raw.length;
-  const uInt8Array = new Uint8Array(rawLength);
-
-  for (let i = 0; i < rawLength; ++i) {
-    uInt8Array[i] = raw.charCodeAt(i);
-  }
-
-  return new Blob([uInt8Array], { type: contentType });
-};
-
-/**
- * Загружает изображение на Kie.ai и возвращает URL
- */
-const uploadImageToKie = async (base64: string): Promise<string> => {
-  const apiKey = getApiKey();
-  const blob = base64ToBlob(base64);
-  const formData = new FormData();
-  formData.append('file', blob, 'image.jpg');
-
-  const response = await fetch(`${KIE_API_FILES}/upload`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: formData,
-  });
-
-  if (!response.ok) {
-    throw new Error(`Ошибка загрузки файла: ${response.statusText}`);
-  }
-
-  const result = await response.json();
-  if (result.code !== 200 || !result.data?.url) {
-    throw new Error(result.msg || "Не удалось загрузить файл на Kie.ai");
-  }
-
-  return result.data.url;
 };
 
 /**
@@ -117,24 +70,20 @@ const pollTaskStatus = async (taskId: string): Promise<string> => {
 };
 
 /**
- * Генерирует изображение
+ * Генерирует изображение на основе уже готового публичного URL
  */
-export const generateGeminiImage = async (prompt: string, faceBase64?: string): Promise<string> => {
+export const generateGeminiImage = async (prompt: string, faceUrl: string): Promise<string> => {
   const apiKey = getApiKey();
   
   if (!apiKey) {
-    throw new Error("API KEY не найден.");
+    throw new Error("Kie.ai API KEY не найден.");
+  }
+
+  if (!faceUrl || !faceUrl.startsWith('http')) {
+    throw new Error("Отсутствует публичный URL изображения лица. Пожалуйста, убедитесь, что конвертация (ImgBB) прошла успешно.");
   }
 
   try {
-    let faceUrl = "";
-    if (faceBase64) {
-      console.log("Uploading face image to Kie.ai...");
-      faceUrl = await uploadImageToKie(faceBase64);
-    } else {
-      throw new Error("Необходимо фото лица.");
-    }
-
     const input: any = {
       prompt: prompt,
       output_format: "png",
@@ -142,7 +91,7 @@ export const generateGeminiImage = async (prompt: string, faceBase64?: string): 
       image_urls: [faceUrl]
     };
 
-    console.log("Creating task with URL:", faceUrl);
+    console.log("Creating task with public URL:", faceUrl);
     
     const createResponse = await fetch(`${KIE_API_JOBS}/createTask`, {
       method: "POST",
@@ -160,7 +109,7 @@ export const generateGeminiImage = async (prompt: string, faceBase64?: string): 
     
     if (!createResponse.ok || createResult.code !== 200) {
       const msg = createResult.message || createResult.msg || createResponse.statusText;
-      throw new Error(msg || "Ошибка создания задачи");
+      throw new Error(msg || "Ошибка создания задачи в Kie.ai");
     }
 
     if (!createResult.data?.taskId) {

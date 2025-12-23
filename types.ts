@@ -5,6 +5,8 @@ export interface UploadedImage {
   previewUrl: string;
   base64: string;
   mimeType: string;
+  publicUrl?: string;
+  isUploading?: boolean;
 }
 
 export enum GenerationMode {

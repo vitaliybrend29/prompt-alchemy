@@ -6,9 +6,6 @@ import { generatePrompts } from './services/geminiService';
 import { generateGeminiImage } from './services/imageGenerationService';
 import { WandIcon, CopyIcon, SparklesIcon, ImageIcon, UserIcon, TrashIcon, TelegramIcon, SettingsIcon, PlayIcon, GridIcon } from './components/Icons';
 
-// Note: Removed local AIStudio interface declaration to resolve duplicate identifier and modifier mismatch errors
-// as these are already provided by the environment.
-
 const MAX_IMAGES_PER_CATEGORY = 5;
 const MAX_HISTORY_ITEMS = 10;
 
@@ -38,10 +35,13 @@ const App: React.FC = () => {
   const [loadingState, setLoadingState] = useState<LoadingState>(LoadingState.IDLE);
   const [error, setError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  
+  // Приоритет: 1. Переменная окружения Vercel, 2. LocalStorage
+  const [imgbbKey, setImgbbKey] = useState(process.env.IMGBB_API_KEY || localStorage.getItem('imgbb_key') || '');
 
   useEffect(() => {
     const checkApiKey = async () => {
-      // @ts-ignore - window.aistudio is globally available but might not be in the local environment's Window type
+      // @ts-ignore
       if (window.aistudio) {
         // @ts-ignore
         const hasKey = await window.aistudio.hasSelectedApiKey();
@@ -72,6 +72,62 @@ const App: React.FC = () => {
     } catch (e) {}
   }, [history]);
 
+  useEffect(() => {
+    if (imgbbKey && imgbbKey !== process.env.IMGBB_API_KEY) {
+      localStorage.setItem('imgbb_key', imgbbKey);
+    }
+  }, [imgbbKey]);
+
+  const convertToPublicUrl = async (image: UploadedImage): Promise<string | undefined> => {
+    const keyToUse = imgbbKey || process.env.IMGBB_API_KEY;
+    
+    if (!keyToUse) {
+      setError("Please set an ImgBB API Key (in Settings or Vercel Environment) to convert images to links.");
+      return undefined;
+    }
+
+    try {
+      const formData = new FormData();
+      const base64Data = image.base64.split(',')[1];
+      formData.append('image', base64Data);
+
+      const response = await fetch(`https://api.imgbb.com/1/upload?key=${keyToUse}`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      const result = await response.json();
+      if (result.success && result.data && result.data.url) {
+        console.log("Image successfully converted to link:", result.data.url);
+        return result.data.url;
+      } else {
+        throw new Error(result.error?.message || "ImgBB upload failed");
+      }
+    } catch (e: any) {
+      setError(`Image conversion failed: ${e.message}`);
+      return undefined;
+    }
+  };
+
+  const handleImageUpload = async (newImages: UploadedImage[], setter: React.Dispatch<React.SetStateAction<UploadedImage[]>>) => {
+    // 1. Сразу добавляем в стейт, чтобы пользователь видел превью
+    setter(prev => [...prev, ...newImages].slice(0, MAX_IMAGES_PER_CATEGORY));
+
+    // 2. Параллельно запускаем загрузку на ImgBB для каждого нового изображения
+    for (const img of newImages) {
+      setter(prev => prev.map(i => i.id === img.id ? { ...i, isUploading: true } : i));
+      
+      const url = await convertToPublicUrl(img);
+      
+      setter(prev => prev.map(i => {
+        if (i.id === img.id) {
+          return { ...i, publicUrl: url, isUploading: false };
+        }
+        return i;
+      }));
+    }
+  };
+
   const handleGenerate = async () => {
     const hasSubject = subjectImages.length > 0;
     const hasStyle = styleImages.length > 0;
@@ -86,6 +142,13 @@ const App: React.FC = () => {
     }
     if ((genMode === GenerationMode.RANDOM_CREATIVE || genMode === GenerationMode.CHARACTER_SHEET) && !hasSubject) {
       setError("Add a subject photo for this mode.");
+      return;
+    }
+
+    // Проверяем, все ли изображения успели конвертироваться в ссылки
+    const pendingConversions = [...subjectImages, ...styleImages].some(img => img.isUploading || !img.publicUrl);
+    if (pendingConversions) {
+      setError("Please wait, images are still being converted to links...");
       return;
     }
 
@@ -106,8 +169,8 @@ const App: React.FC = () => {
         id: Date.now().toString(),
         timestamp: Date.now(),
         prompts: promptsWithThumbnails,
-        styleReferences: styleImages.map(i => i.base64),
-        subjectReferences: subjectImages.map(i => i.base64),
+        styleReferences: styleImages.map(i => i.publicUrl || i.base64),
+        subjectReferences: subjectImages.map(i => i.publicUrl || i.base64),
         mode: genMode,
       };
 
@@ -135,6 +198,10 @@ const App: React.FC = () => {
 
     try {
       const faceRef = group.subjectReferences[0];
+      if (!faceRef || !faceRef.startsWith('http')) {
+        throw new Error("No public link (URL) found for the face. Please re-upload the image.");
+      }
+      
       const imageUrl = await generateGeminiImage(promptObj.text, faceRef);
       
       setHistory(prev => {
@@ -199,22 +266,40 @@ const App: React.FC = () => {
 
         {showSettings && (
           <div className="max-w-6xl mx-auto px-4 mt-4 animate-in slide-in-from-top duration-300">
-            <div className="bg-surface border border-slate-700 rounded-2xl p-5 shadow-2xl">
-              <h3 className="text-sm font-bold text-white mb-2 flex items-center gap-2">
-                <SettingsIcon className="w-4 h-4 text-indigo-400" />
-                Gemini API Key
-              </h3>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                App uses the system-provided API key for all AI operations including prompt analysis and image generation. 
-                If you encounter "Entity not found", please click the button below to re-select your key.
-              </p>
-              <button 
-                // @ts-ignore
-                onClick={() => window.aistudio.openSelectKey()}
-                className="mt-4 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg transition-colors"
-              >
-                Change API Key
-              </button>
+            <div className="bg-surface border border-slate-700 rounded-2xl p-6 shadow-2xl grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-4">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <SettingsIcon className="w-4 h-4 text-indigo-400" />
+                  Gemini & Kie.ai
+                </h3>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  System uses the primary selected API key for both prompt alchemy and image generation via Kie.ai.
+                </p>
+                <button 
+                  // @ts-ignore
+                  onClick={() => window.aistudio.openSelectKey()}
+                  className="w-full px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg transition-colors"
+                >
+                  Select / Change Primary Key
+                </button>
+              </div>
+
+              <div className="space-y-4 border-l border-slate-800 pl-0 md:pl-6">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <ImageIcon className="w-4 h-4 text-emerald-400" />
+                  ImgBB Converter (PNG Link Creator)
+                </h3>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Required for Kie.ai compatibility. If set in Vercel, manual input is not needed. <a href="https://api.imgbb.com/" target="_blank" className="text-indigo-400 underline">Get a free key here</a>.
+                </p>
+                <input 
+                  type="password"
+                  value={imgbbKey}
+                  onChange={(e) => setImgbbKey(e.target.value)}
+                  placeholder={process.env.IMGBB_API_KEY ? "Using Vercel API Key..." : "Paste ImgBB API Key here..."}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white focus:ring-1 focus:ring-indigo-500 outline-none"
+                />
+              </div>
             </div>
           </div>
         )}
@@ -230,7 +315,7 @@ const App: React.FC = () => {
                 label="Target (Person's Face)"
                 images={subjectImages}
                 maxCount={MAX_IMAGES_PER_CATEGORY}
-                onImagesUpload={(imgs) => setSubjectImages(prev => [...prev, ...imgs].slice(0, MAX_IMAGES_PER_CATEGORY))}
+                onImagesUpload={(imgs) => handleImageUpload(imgs, setSubjectImages)}
                 onRemove={(id) => setSubjectImages(prev => prev.filter(i => i.id !== id))}
                 icon={<UserIcon className="w-4 h-4 text-purple-400" />}
               />
@@ -240,7 +325,7 @@ const App: React.FC = () => {
                   label="Style Reference"
                   images={styleImages}
                   maxCount={MAX_IMAGES_PER_CATEGORY}
-                  onImagesUpload={(imgs) => setStyleImages(prev => [...prev, ...imgs].slice(0, MAX_IMAGES_PER_CATEGORY))}
+                  onImagesUpload={(imgs) => handleImageUpload(imgs, setStyleImages)}
                   onRemove={(id) => setStyleImages(prev => prev.filter(i => i.id !== id))}
                   icon={<ImageIcon className="w-4 h-4 text-indigo-400" />}
                 />
@@ -374,7 +459,7 @@ const App: React.FC = () => {
                       <div className="ml-0 sm:ml-28 rounded-2xl overflow-hidden border border-slate-700 bg-slate-900 shadow-2xl max-w-sm aspect-square relative group/res animate-in zoom-in fade-in duration-500">
                         <img src={prompt.generatedImageUrl} alt="Generated" className="w-full h-full object-cover" />
                         <div className="absolute inset-0 bg-black/60 opacity-0 group-hover/res:opacity-100 transition-opacity flex items-center justify-center gap-3">
-                          <a href={prompt.generatedImageUrl} download className="px-4 py-2 bg-indigo-600 text-white rounded-full text-xs font-bold hover:bg-indigo-500 transition-all">Download</a>
+                          <a href={prompt.generatedImageUrl} target="_blank" rel="noreferrer" className="px-4 py-2 bg-indigo-600 text-white rounded-full text-xs font-bold hover:bg-indigo-500 transition-all">View Original</a>
                         </div>
                       </div>
                     )}
