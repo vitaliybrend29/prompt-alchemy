@@ -168,8 +168,7 @@ const App: React.FC = () => {
     setError(null);
     setLoadingState(LoadingState.ANALYZING);
     try {
-      const currentMode = nsfcEnabled ? GenerationMode.NSFC : genMode;
-      const results = await generatePrompts(styleImages, subjectImages, promptCount, currentMode, customSceneText);
+      const results = await generatePrompts(styleImages, subjectImages, promptCount, genMode, nsfcEnabled, customSceneText);
       const newGroup: PromptGroup = {
         id: Date.now().toString(),
         timestamp: Date.now(),
@@ -180,7 +179,7 @@ const App: React.FC = () => {
         })),
         styleReferences: styleImages.map(i => i.publicUrl!).filter(Boolean),
         subjectReferences: subjectImages.map(i => i.publicUrl!).filter(Boolean),
-        mode: currentMode,
+        mode: nsfcEnabled ? GenerationMode.NSFC : genMode, // Сохраняем NSFC в истории если он был включен
       };
       setHistory(prev => [newGroup, ...prev]);
       setLoadingState(LoadingState.IDLE);
@@ -196,6 +195,7 @@ const App: React.FC = () => {
     if (!prompt || prompt.isGenerating || !group) return;
 
     try {
+      // Передаем фактический режим группы (был ли там NSFC)
       const taskId = await startImageGenerationTask(prompt.text, group.subjectReferences, aspectRatio, qualityLevel, group.mode);
       resumeMonitoringProcess(groupId, promptId, taskId);
     } catch (err: any) {
@@ -371,16 +371,14 @@ const App: React.FC = () => {
               maxCount={8} 
             />
 
-            {genMode === GenerationMode.MATCH_STYLE && (
-              <ImageUploader 
-                label="2. Style References" 
-                images={styleImages} 
-                onImagesUpload={imgs => setStyleImages(p => [...p, ...imgs].slice(0, 5))} 
-                onRemove={id => setStyleImages(p => p.filter(i => i.id !== id))} 
-                icon={<ImageIcon className="w-4 h-4 text-emerald-400" />} 
-                maxCount={5}
-              />
-            )}
+            <ImageUploader 
+              label="2. Style References" 
+              images={styleImages} 
+              onImagesUpload={imgs => setStyleImages(p => [...p, ...imgs].slice(0, 5))} 
+              onRemove={id => setStyleImages(p => p.filter(i => i.id !== id))} 
+              icon={<ImageIcon className="w-4 h-4 text-emerald-400" />} 
+              maxCount={5}
+            />
 
             <div>
               <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4 block">3. Select Mode</label>
