@@ -8,14 +8,17 @@ const getApiKey = () => {
 };
 
 /**
- * Опрашивает API, имитируя получение данных из колбэка.
- * Использует тот же формат данных, что пришел в логах Vercel.
+ * Опрашивает API для получения статуса задачи.
+ * Обрабатывает специфический формат resultJson (строка в строке), 
+ * который присылает Kie.ai в колбэках и ответах.
  */
 export const pollTaskStatus = async (taskId: string): Promise<string> => {
   const apiKey = getApiKey();
-  const maxAttempts = 60; 
+  const maxAttempts = 80; // Увеличиваем время ожидания до ~6 минут
   let attempts = 0;
   const statusUrl = `${KIE_API_JOBS_BASE}/${taskId}`;
+
+  console.log(`[Task ${taskId}] Поллинг запущен...`);
 
   while (attempts < maxAttempts) {
     try {
@@ -33,60 +36,64 @@ export const pollTaskStatus = async (taskId: string): Promise<string> => {
       }
 
       const raw = await response.json();
-      // Структура из лога: { data: { state: "success", resultJson: "..." } }
       const result = raw.data || raw;
       const state = (result.state || "").toLowerCase();
       
-      console.log(`[Task ${taskId}] Status: ${state}`);
+      console.log(`[Task ${taskId}] Статус: ${state}`);
 
       if (state === "success" || state === "completed") {
         let foundUrl = "";
         
-        // 1. Пытаемся достать из resultJson (как в логе пользователя)
+        // 1. Пытаемся вытянуть URL из resultJson (как в логах пользователя)
         if (result.resultJson) {
           try {
-            const parsedJson = typeof result.resultJson === 'string' 
+            // Если resultJson - это строка, парсим её
+            const parsed = typeof result.resultJson === 'string' 
               ? JSON.parse(result.resultJson) 
               : result.resultJson;
               
-            if (parsedJson.resultUrls && parsedJson.resultUrls[0]) {
-              foundUrl = parsedJson.resultUrls[0];
+            if (parsed.resultUrls && Array.isArray(parsed.resultUrls) && parsed.resultUrls[0]) {
+              foundUrl = parsed.resultUrls[0];
+            } else if (parsed.imageUrl) {
+              foundUrl = parsed.imageUrl;
             }
           } catch (e) {
-            console.warn("Failed to parse resultJson", e);
+            console.warn("[Polling] Ошибка парсинга resultJson:", e);
           }
         }
 
-        // 2. Запасной вариант (прямые поля)
+        // 2. Запасной путь (если URL лежит в корне объекта data)
         if (!foundUrl) {
           foundUrl = result.imageUrl || result.resultUrl || (result.result?.resultUrls ? result.result.resultUrls[0] : "");
         }
         
         if (foundUrl) {
-          console.log(`[Task ${taskId}] Found Image URL: ${foundUrl}`);
+          console.log(`[Task ${taskId}] Успех! URL найден: ${foundUrl}`);
           return foundUrl;
+        } else {
+          console.warn(`[Task ${taskId}] Статус success, но URL не найден в ответе. Ответ API:`, result);
         }
       }
 
       if (state === "failed" || state === "error") {
-        throw new Error(result.failMsg || result.msg || "Generation failed on server");
+        throw new Error(result.failMsg || result.msg || "Ошибка генерации на сервере");
       }
 
     } catch (e: any) {
-      console.error("Polling error:", e.message);
-      if (e.message.includes("failed")) throw e;
+      console.error("[Polling] Ошибка запроса:", e.message);
+      if (e.message.includes("Ошибка генерации")) throw e;
     }
 
-    // Ждем 4 секунды перед следующим запросом
-    await new Promise(r => setTimeout(r, 4000));
+    // Ждем 5 секунд между попытками
+    await new Promise(r => setTimeout(r, 5000));
     attempts++;
   }
-  throw new Error("Generation timed out. Check back later.");
+  throw new Error("Превышено время ожидания. Попробуйте обновить страницу позже.");
 };
 
 export const createTask = async (prompt: string, faceUrl: string, callbackUrl?: string): Promise<string> => {
   const apiKey = getApiKey();
-  if (!apiKey) throw new Error("API KEY missing");
+  if (!apiKey) throw new Error("KIE_API_KEY не настроен");
 
   const payload: any = {
     model: "google/nano-banana-edit",
@@ -98,7 +105,7 @@ export const createTask = async (prompt: string, faceUrl: string, callbackUrl?: 
     }
   };
 
-  // Передаем оба варианта именования для совместимости
+  // Передаем callbackUrl в двух вариантах написания для надежности
   if (callbackUrl) {
     payload.callBackUrl = callbackUrl;
     payload.callback_url = callbackUrl;
@@ -116,6 +123,6 @@ export const createTask = async (prompt: string, faceUrl: string, callbackUrl?: 
   const data = await res.json();
   const taskId = data.data?.taskId || data.taskId;
   
-  if (!taskId) throw new Error(data.msg || "Failed to initiate generation");
+  if (!taskId) throw new Error(data.msg || "Не удалось создать задачу");
   return taskId;
 };
