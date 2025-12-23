@@ -179,7 +179,7 @@ const App: React.FC = () => {
         })),
         styleReferences: styleImages.map(i => i.publicUrl!).filter(Boolean),
         subjectReferences: subjectImages.map(i => i.publicUrl!).filter(Boolean),
-        mode: nsfcEnabled ? GenerationMode.NSFC : genMode, // Сохраняем NSFC в истории если он был включен
+        mode: nsfcEnabled ? GenerationMode.NSFC : genMode, 
       };
       setHistory(prev => [newGroup, ...prev]);
       setLoadingState(LoadingState.IDLE);
@@ -195,7 +195,6 @@ const App: React.FC = () => {
     if (!prompt || prompt.isGenerating || !group) return;
 
     try {
-      // Передаем фактический режим группы (был ли там NSFC)
       const taskId = await startImageGenerationTask(prompt.text, group.subjectReferences, aspectRatio, qualityLevel, group.mode);
       resumeMonitoringProcess(groupId, promptId, taskId);
     } catch (err: any) {
@@ -327,7 +326,6 @@ const App: React.FC = () => {
           </div>
           
           <div className="flex items-center gap-3">
-            {/* Глобальный переключатель NSFC - Компактный и аккуратный */}
             <button 
               onClick={() => setNsfcEnabled(!nsfcEnabled)}
               className={`flex items-center gap-2 px-4 py-2 rounded-full transition-all text-[9px] font-black uppercase tracking-[0.2em] border shadow-xl ${
@@ -357,11 +355,11 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-6 mt-8 grid grid-cols-1 lg:grid-cols-12 gap-10 pb-20">
+      <main className="max-w-7xl mx-auto px-6 mt-8 grid grid-cols-1 lg:grid-cols-12 gap-10 pb-20 items-start">
         
-        <div className="lg:col-span-4 space-y-6">
-          <div className="bg-[#0e111a] border border-white/5 rounded-3xl p-8 shadow-2xl sticky top-24 space-y-8">
-            
+        {/* Боковая панель управления */}
+        <div className="lg:col-span-4 sticky top-24 max-h-[calc(100vh-120px)] overflow-y-auto custom-scrollbar bg-[#0e111a] border border-white/5 rounded-3xl p-8 shadow-2xl">
+          <div className="space-y-8">
             <ImageUploader 
               label="1. Target Identity" 
               images={subjectImages} 
@@ -470,20 +468,23 @@ const App: React.FC = () => {
               )}
             </div>
 
-            <button 
-              onClick={runPromptEngineeringProcess} 
-              disabled={loadingState === LoadingState.ANALYZING} 
-              className={`w-full py-5 rounded-full font-black text-xs uppercase tracking-[0.2em] transition-all active:scale-95 disabled:opacity-20 shadow-2xl ${
-                nsfcEnabled ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-white text-black hover:bg-indigo-600 hover:text-white'
-              }`}
-            >
-              {loadingState === LoadingState.ANALYZING ? 'Processing...' : 'Generate Prompts'}
-            </button>
-            {error && <p className="text-[10px] text-red-400 text-center font-black uppercase italic">! {error}</p>}
+            <div className="pt-4 pb-2">
+              <button 
+                onClick={runPromptEngineeringProcess} 
+                disabled={loadingState === LoadingState.ANALYZING} 
+                className={`w-full py-5 rounded-full font-black text-xs uppercase tracking-[0.2em] transition-all active:scale-95 disabled:opacity-20 shadow-2xl ${
+                  nsfcEnabled ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-white text-black hover:bg-indigo-600 hover:text-white'
+                }`}
+              >
+                {loadingState === LoadingState.ANALYZING ? 'Processing...' : 'Generate Prompts'}
+              </button>
+              {error && <p className="text-[10px] text-red-400 text-center font-black uppercase italic mt-4">! {error}</p>}
+            </div>
           </div>
         </div>
 
-        <div className="lg:col-span-8 space-y-12">
+        {/* Правая колонка с историей */}
+        <div className="lg:col-span-8 space-y-12 min-h-screen">
           {history.length === 0 && (
             <div className="flex flex-col items-center justify-center py-40 border border-dashed border-white/5 rounded-[3rem] opacity-20">
               <SparklesIcon className="w-16 h-16 mb-6" />
@@ -555,6 +556,15 @@ const App: React.FC = () => {
                             {p.generatedImageUrls.map((url, idx) => (
                               <div key={idx} className="relative aspect-square group/img rounded-3xl overflow-hidden border border-white/5 shadow-2xl bg-black">
                                 <img src={url} className="w-full h-full object-cover transition-all duration-1000 group-hover/img:scale-110" />
+                                
+                                {/* Badge showing the model name */}
+                                <div className="absolute top-3 left-3 px-2 py-1 bg-black/50 backdrop-blur-md rounded-lg border border-white/10 flex items-center gap-1.5 z-10 pointer-events-none">
+                                  <div className={`w-1 h-1 rounded-full animate-pulse ${group.mode === GenerationMode.NSFC ? 'bg-red-500 shadow-[0_0_5px_rgba(239,68,68,0.8)]' : 'bg-indigo-500 shadow-[0_0_5px_rgba(99,102,241,0.8)]'}`}></div>
+                                  <span className="text-[7px] font-black uppercase tracking-[0.2em] text-white/80">
+                                    {group.mode === GenerationMode.NSFC ? 'SeeDream 4.5' : 'Nano Banana'}
+                                  </span>
+                                </div>
+
                                 <div className="absolute inset-0 bg-black/60 opacity-0 group-hover/img:opacity-100 transition-opacity flex flex-col items-center justify-center gap-3">
                                   <div className="flex gap-2">
                                     <button 
