@@ -16,9 +16,9 @@ const getApiKey = () => {
 /**
  * Опрашивает статус задачи до завершения или ошибки.
  */
-const pollTaskStatus = async (taskId: string): Promise<string> => {
+export const pollTaskStatus = async (taskId: string): Promise<string> => {
   const apiKey = getApiKey();
-  const maxAttempts = 60; 
+  const maxAttempts = 100; // Увеличили время ожидания для фоновых задач
   let attempts = 0;
   const statusUrl = `${KIE_API_JOBS_BASE}/${taskId}`;
 
@@ -65,7 +65,7 @@ const pollTaskStatus = async (taskId: string): Promise<string> => {
 
     } catch (e: any) {
       console.warn("Polling error:", e.message);
-      if (attempts > 20) throw e;
+      // Не прерываемся при сетевых ошибках
     }
 
     await new Promise(resolve => setTimeout(resolve, 5000));
@@ -75,59 +75,46 @@ const pollTaskStatus = async (taskId: string): Promise<string> => {
 };
 
 /**
- * Создание задачи генерации
- * @param prompt Текст промта
- * @param faceUrl Ссылка на фото лица
- * @param callbackUrl URL для уведомления сайта
+ * Создание задачи генерации (возвращает только taskId)
+ */
+export const createTask = async (prompt: string, faceUrl: string, callbackUrl?: string): Promise<string> => {
+  const apiKey = getApiKey();
+  if (!apiKey) throw new Error("API KEY не найден.");
+
+  const payload: any = {
+    model: "google/nano-banana-edit",
+    input: {
+      prompt: prompt,
+      image_urls: [faceUrl],
+      output_format: "png",
+      image_size: "1:1"
+    }
+  };
+
+  if (callbackUrl && callbackUrl.trim().startsWith('http')) {
+    payload.callBackUrl = callbackUrl.trim();
+  }
+
+  const createResponse = await fetch(CREATE_TASK_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const createResult = await createResponse.json();
+  const taskId = createResult.data?.taskId || createResult.taskId || createResult.data?.id;
+  
+  if (!taskId) throw new Error("No taskId returned");
+  return taskId;
+};
+
+/**
+ * Обертка для полной генерации (создание + ожидание)
  */
 export const generateGeminiImage = async (prompt: string, faceUrl: string, callbackUrl?: string): Promise<string> => {
-  const apiKey = getApiKey();
-  
-  if (!apiKey) {
-    throw new Error("API KEY не найден.");
-  }
-
-  try {
-    const payload: any = {
-      model: "google/nano-banana-edit",
-      input: {
-        prompt: prompt,
-        image_urls: [faceUrl],
-        output_format: "png",
-        image_size: "1:1"
-      }
-    };
-
-    // Добавляем callBackUrl (в Kie.ai используется camelCase)
-    if (callbackUrl && callbackUrl.trim().startsWith('http')) {
-      payload.callBackUrl = callbackUrl.trim();
-      console.log(`Setting callback URL for task: ${payload.callBackUrl}`);
-    }
-
-    const createResponse = await fetch(CREATE_TASK_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(payload),
-    });
-
-    if (!createResponse.ok) {
-        const errText = await createResponse.text();
-        throw new Error(`Create failed: ${errText}`);
-    }
-
-    const createResult = await createResponse.json();
-    const taskId = createResult.data?.taskId || createResult.taskId || createResult.data?.id;
-    
-    if (!taskId) throw new Error("No taskId returned from API");
-
-    // Даже если мы используем Callback, мы продолжаем опрашивать статус,
-    // чтобы пользователь на сайте сразу увидел результат.
-    return await pollTaskStatus(taskId);
-
-  } catch (error: any) {
-    throw error;
-  }
+  const taskId = await createTask(prompt, faceUrl, callbackUrl);
+  return await pollTaskStatus(taskId);
 };

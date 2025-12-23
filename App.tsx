@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import ImageUploader from './components/ImageUploader';
 import { UploadedImage, LoadingState, GenerationMode, PromptGroup, GeneratedPrompt } from './types';
 import { generatePrompts } from './services/geminiService';
-import { generateGeminiImage } from './services/imageGenerationService';
+import { createTask, pollTaskStatus } from './services/imageGenerationService';
 import { WandIcon, CopyIcon, SparklesIcon, ImageIcon, UserIcon, TrashIcon, TelegramIcon, SettingsIcon, PlayIcon, GridIcon } from './components/Icons';
 
 const MAX_IMAGES_PER_CATEGORY = 5;
@@ -38,11 +38,32 @@ const App: React.FC = () => {
   
   const [imgbbKey, setImgbbKey] = useState(process.env.IMGBB_API_KEY || localStorage.getItem('imgbb_key') || '');
   
-  // Автоматическое определение URL сайта для callback
   const defaultCallback = typeof window !== 'undefined' 
     ? `${window.location.origin}/api/callback` 
     : '';
   const [callbackUrl, setCallbackUrl] = useState(localStorage.getItem('kie_callback_url') || defaultCallback);
+
+  // Инициализация истории и восстановление задач
+  useEffect(() => {
+    const saved = localStorage.getItem('prompt_alchemy_v5');
+    if (saved) {
+      try {
+        const parsedHistory: PromptGroup[] = JSON.parse(saved);
+        setHistory(parsedHistory);
+        
+        // Авто-возобновление задач, которые были в процессе
+        parsedHistory.forEach((group, gIdx) => {
+          group.prompts.forEach((prompt, pIdx) => {
+            if (prompt.taskId && !prompt.generatedImageUrl && !prompt.error) {
+              resumePolling(gIdx, pIdx, prompt.taskId);
+            }
+          });
+        });
+      } catch (e) {
+        localStorage.removeItem('prompt_alchemy_v5');
+      }
+    }
+  }, []);
 
   useEffect(() => {
     const checkApiKey = async () => {
@@ -57,17 +78,6 @@ const App: React.FC = () => {
       }
     };
     checkApiKey();
-  }, []);
-
-  useEffect(() => {
-    const saved = localStorage.getItem('prompt_alchemy_v5');
-    if (saved) {
-      try {
-        setHistory(JSON.parse(saved));
-      } catch (e) {
-        localStorage.removeItem('prompt_alchemy_v5');
-      }
-    }
   }, []);
 
   useEffect(() => {
@@ -86,6 +96,47 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('kie_callback_url', callbackUrl);
   }, [callbackUrl]);
+
+  const resumePolling = async (groupIdx: number, promptIdx: number, taskId: string) => {
+    setHistory(prev => {
+      const next = [...prev];
+      if (next[groupIdx]?.prompts[promptIdx]) {
+        next[groupIdx].prompts[promptIdx] = { 
+          ...next[groupIdx].prompts[promptIdx], 
+          isGenerating: true,
+          taskId: taskId 
+        };
+      }
+      return next;
+    });
+
+    try {
+      const imageUrl = await pollTaskStatus(taskId);
+      setHistory(prev => {
+        const next = [...prev];
+        if (next[groupIdx]?.prompts[promptIdx]) {
+          next[groupIdx].prompts[promptIdx] = { 
+            ...next[groupIdx].prompts[promptIdx], 
+            isGenerating: false, 
+            generatedImageUrl: imageUrl 
+          };
+        }
+        return next;
+      });
+    } catch (err: any) {
+      setHistory(prev => {
+        const next = [...prev];
+        if (next[groupIdx]?.prompts[promptIdx]) {
+          next[groupIdx].prompts[promptIdx] = { 
+            ...next[groupIdx].prompts[promptIdx], 
+            isGenerating: false, 
+            error: err.message 
+          };
+        }
+        return next;
+      });
+    }
+  };
 
   const convertToPublicUrl = async (image: UploadedImage): Promise<string | undefined> => {
     const keyToUse = imgbbKey || process.env.IMGBB_API_KEY;
@@ -157,8 +208,17 @@ const App: React.FC = () => {
 
     try {
       const faceRef = group.subjectReferences[0];
-      // Используем сохраненный callbackUrl
-      const imageUrl = await generateGeminiImage(promptObj.text, faceRef, callbackUrl);
+      const taskId = await createTask(promptObj.text, faceRef, callbackUrl);
+      
+      // Обновляем taskId в истории сразу
+      setHistory(prev => {
+        const next = [...prev];
+        next[groupIndex].prompts[promptIndex] = { ...next[groupIndex].prompts[promptIndex], taskId: taskId };
+        return next;
+      });
+
+      // Начинаем опрос
+      const imageUrl = await pollTaskStatus(taskId);
       
       setHistory(prev => {
         const next = [...prev];
@@ -204,7 +264,7 @@ const App: React.FC = () => {
                 </div>
                 <div className="space-y-4 border-l border-slate-800 pl-0 md:pl-6">
                   <h3 className="text-sm font-bold text-white flex items-center gap-2"><GridIcon className="w-4 h-4 text-sky-400" /> Site Webhook</h3>
-                  <p className="text-[11px] text-slate-400">This URL receives results directly to your site's backend for processing or history.</p>
+                  <p className="text-[11px] text-slate-400">This URL receives results directly to your site's backend.</p>
                   <div className="flex gap-2">
                     <input 
                       type="text" 
@@ -217,7 +277,7 @@ const App: React.FC = () => {
                       onClick={() => setCallbackUrl(defaultCallback)}
                       className="px-2 py-1 text-[9px] bg-slate-800 hover:bg-slate-700 rounded border border-slate-600 text-slate-300 transition-colors"
                     >
-                      Reset to Default
+                      Reset
                     </button>
                   </div>
                 </div>
@@ -269,8 +329,13 @@ const App: React.FC = () => {
                         <div className="flex justify-between mb-2">
                           <span className="text-[9px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded font-bold">V{pIdx + 1}</span>
                           <div className="flex gap-2">
-                            <button onClick={() => handleGenImage(groupIdx, pIdx)} disabled={prompt.isGenerating} className="text-[10px] font-bold bg-indigo-600 px-3 py-1 rounded-lg hover:bg-indigo-500">
-                              {prompt.isGenerating ? "Gen..." : "Gen Image"}
+                            <button onClick={() => handleGenImage(groupIdx, pIdx)} disabled={prompt.isGenerating} className="text-[10px] font-bold bg-indigo-600 px-3 py-1 rounded-lg hover:bg-indigo-500 flex items-center gap-2">
+                              {prompt.isGenerating ? (
+                                <>
+                                  <span className="w-2 h-2 bg-white rounded-full animate-ping"></span>
+                                  Generating...
+                                </>
+                              ) : "Gen Image"}
                             </button>
                             <button onClick={() => copyToClipboard(prompt.text)} className="text-slate-500 hover:text-white"><CopyIcon className="w-4 h-4" /></button>
                           </div>
@@ -280,8 +345,9 @@ const App: React.FC = () => {
                       </div>
                     </div>
                     {prompt.generatedImageUrl && (
-                      <div className="ml-0 sm:ml-28 rounded-2xl overflow-hidden border border-slate-700 max-w-sm aspect-square">
+                      <div className="ml-0 sm:ml-28 rounded-2xl overflow-hidden border border-slate-700 max-w-sm aspect-square bg-slate-900 relative">
                         <img src={prompt.generatedImageUrl} className="w-full h-full object-cover" />
+                        <div className="absolute top-2 right-2 p-1 bg-black/50 backdrop-blur-md rounded text-white text-[9px] font-bold">Generated</div>
                       </div>
                     )}
                   </div>

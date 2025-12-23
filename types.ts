@@ -22,6 +22,7 @@ export interface GeneratedPrompt {
   isGenerating?: boolean;
   generatedImageUrl?: string;
   error?: string;
+  taskId?: string; // ID задачи для восстановления
 }
 
 export interface PromptGroup {
