@@ -41,7 +41,7 @@ const App: React.FC = () => {
 
   // Восстановление истории и активных опросов при загрузке
   useEffect(() => {
-    const saved = localStorage.getItem('alchemy_history_v4');
+    const saved = localStorage.getItem('alchemy_history_v5');
     if (saved) {
       try {
         const parsed: PromptGroup[] = JSON.parse(saved);
@@ -55,14 +55,14 @@ const App: React.FC = () => {
           });
         });
       } catch (e) {
-        localStorage.removeItem('alchemy_history_v4');
+        localStorage.removeItem('alchemy_history_v5');
       }
     }
   }, []);
 
   // Синхронизация истории с localStorage
   useEffect(() => {
-    localStorage.setItem('alchemy_history_v4', JSON.stringify(history.slice(0, MAX_HISTORY_ITEMS)));
+    localStorage.setItem('alchemy_history_v5', JSON.stringify(history.slice(0, MAX_HISTORY_ITEMS)));
   }, [history]);
 
   const resumePolling = async (groupIdx: number, promptIdx: number, taskId: string) => {
@@ -166,7 +166,7 @@ const App: React.FC = () => {
 
     try {
       const faceUrl = group.subjectReferences[0];
-      if (!faceUrl) throw new Error("Публичная ссылка на лицо не готова. Подождите или перезагрузите фото.");
+      if (!faceUrl) throw new Error("Публичная ссылка на лицо еще не готова. Подождите пару секунд.");
       
       const taskId = await createTask(prompt.text, faceUrl, callbackUrl);
       resumePolling(groupIdx, promptIdx, taskId);
@@ -178,7 +178,7 @@ const App: React.FC = () => {
   const clearHistory = () => {
     if (confirm("Удалить всю историю?")) {
       setHistory([]);
-      localStorage.removeItem('alchemy_history_v4');
+      localStorage.removeItem('alchemy_history_v5');
     }
   };
 
@@ -211,7 +211,7 @@ const App: React.FC = () => {
           <div className="max-w-6xl mx-auto mt-4 p-6 bg-surface rounded-3xl border border-slate-700 shadow-2xl space-y-4 animate-in slide-in-from-top-4 duration-300">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div className="space-y-2">
-                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">ImgBB API Key</label>
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">ImgBB API Key (для публичных ссылок)</label>
                 <input 
                   type="password" 
                   value={imgbbKey} 
@@ -221,7 +221,7 @@ const App: React.FC = () => {
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Callback Webhook URL</label>
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Callback URL (Webhook)</label>
                 <input 
                   type="text" 
                   value={callbackUrl} 
@@ -231,6 +231,7 @@ const App: React.FC = () => {
                 />
               </div>
             </div>
+            <p className="text-[9px] text-slate-500 italic">Сайт опрашивает сервер Kie.ai напрямую. Коллбэк нужен для внешних уведомлений (например, в Telegram).</p>
           </div>
         )}
       </header>
@@ -298,7 +299,7 @@ const App: React.FC = () => {
               )}
               
               <div className="flex items-center justify-between p-3.5 bg-slate-900/50 rounded-2xl border border-slate-700">
-                <span className="text-[10px] font-black text-slate-400 ml-2 uppercase tracking-tighter">Варианты:</span>
+                <span className="text-[10px] font-black text-slate-400 ml-2 uppercase tracking-tighter">Варианты промтов:</span>
                 <div className="flex gap-1.5">
                   {[1, 3, 5].map(c => (
                     <button 
@@ -323,7 +324,7 @@ const App: React.FC = () => {
               </button>
               
               {error && (
-                <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl">
+                <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl animate-pulse">
                   <p className="text-[10px] text-red-400 text-center font-bold uppercase">{error}</p>
                 </div>
               )}
@@ -350,13 +351,13 @@ const App: React.FC = () => {
                       {p.referenceImage && (
                         <div className="relative shrink-0">
                           <img src={p.referenceImage} className="w-24 h-24 rounded-[1.5rem] object-cover border border-slate-700 shadow-xl" />
-                          <div className="absolute -top-2 -left-2 bg-indigo-600 text-[8px] font-black px-2 py-0.5 rounded-full shadow-lg">REF</div>
+                          <div className="absolute -top-2 -left-2 bg-indigo-600 text-[8px] font-black px-2 py-0.5 rounded-full shadow-lg">STYLE</div>
                         </div>
                       )}
                       
                       <div className="flex-grow bg-slate-900/40 border border-slate-800/50 rounded-3xl p-6 relative group/prompt">
                         <div className="flex justify-between items-start mb-4">
-                          <span className="text-[10px] font-black text-indigo-500/40">OPUS #{pi + 1}</span>
+                          <span className="text-[10px] font-black text-indigo-500/40">ОПУС #{pi + 1}</span>
                           <div className="flex gap-2">
                             <button 
                               onClick={() => handleGenImage(gIdx, pi)} 
@@ -368,7 +369,7 @@ const App: React.FC = () => {
                               }`}
                             >
                               {p.isGenerating ? (
-                                <><span className="w-2 h-2 bg-indigo-400 rounded-full animate-pulse"></span> Ожидание...</>
+                                <><span className="w-2 h-2 bg-indigo-400 rounded-full animate-pulse"></span> Поллинг...</>
                               ) : p.generatedImageUrl ? 'Перегенерировать' : 'Создать фото'}
                             </button>
                             <button 
@@ -379,16 +380,24 @@ const App: React.FC = () => {
                             </button>
                           </div>
                         </div>
-                        <p className="text-sm leading-relaxed text-slate-300 font-medium selection:bg-indigo-500/40">{p.text}</p>
+                        <p className="text-sm leading-relaxed text-slate-300 font-medium selection:bg-indigo-500/40 italic">"{p.text}"</p>
                         
                         {p.isGenerating && (
-                           <div className="mt-4 flex items-center gap-3 text-[9px] text-slate-500 font-bold bg-indigo-500/5 p-2 rounded-xl border border-indigo-500/10">
-                              <div className="w-2 h-2 rounded-full bg-indigo-500 animate-ping"></div>
-                              ПРОВЕРКА СТАТУСА: {p.taskId?.substring(0, 10)}...
+                           <div className="mt-4 flex flex-col gap-2">
+                             <div className="flex items-center gap-3 text-[9px] text-indigo-400 font-bold bg-indigo-500/5 p-2 rounded-xl border border-indigo-500/10">
+                                <div className="w-2 h-2 rounded-full bg-indigo-500 animate-ping"></div>
+                                ID ЗАДАЧИ: {p.taskId}
+                             </div>
+                             <p className="text-[8px] text-slate-600 ml-2">Ожидание ответа от сервера (до 2-3 минут)...</p>
                            </div>
                         )}
                         
-                        {p.error && <p className="text-[10px] text-red-400 mt-4 font-bold bg-red-400/10 p-3 rounded-xl border border-red-400/20">Ошибка: {p.error}</p>}
+                        {p.error && (
+                          <div className="mt-4 p-3 bg-red-400/10 border border-red-400/20 rounded-xl">
+                            <p className="text-[10px] text-red-400 font-bold">Ошибка: {p.error}</p>
+                            <button onClick={() => handleGenImage(gIdx, pi)} className="text-[8px] mt-1 text-indigo-400 underline uppercase">Попробовать еще раз</button>
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -413,7 +422,7 @@ const App: React.FC = () => {
                             </button>
                           </div>
                         </div>
-                        <div className="absolute top-6 right-6 bg-indigo-600 text-white text-[10px] font-black px-4 py-1.5 rounded-full shadow-2xl ring-4 ring-indigo-600/20">SUCCESS</div>
+                        <div className="absolute top-6 right-6 bg-indigo-600 text-white text-[10px] font-black px-4 py-1.5 rounded-full shadow-2xl ring-4 ring-indigo-600/20">READY</div>
                       </div>
                     )}
                   </div>
@@ -425,7 +434,7 @@ const App: React.FC = () => {
           {history.length === 0 && (
             <div className="h-96 flex flex-col items-center justify-center text-slate-800 border-4 border-dashed border-slate-800/30 rounded-[4rem]">
               <SparklesIcon className="w-20 h-20 mb-8 opacity-5" />
-              <p className="text-xl font-black uppercase tracking-[0.3em] opacity-10">Пустота ждет формы</p>
+              <p className="text-xl font-black uppercase tracking-[0.3em] opacity-10 italic">Пространство алхимии</p>
             </div>
           )}
         </div>

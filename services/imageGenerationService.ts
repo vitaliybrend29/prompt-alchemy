@@ -9,16 +9,17 @@ const getApiKey = () => {
 
 /**
  * Опрашивает API для получения статуса задачи.
- * Обрабатывает специфический формат resultJson (строка в строке), 
- * который присылает Kie.ai в колбэках и ответах.
+ * Использует официальный метод recordInfo согласно документации Kie.ai.
  */
 export const pollTaskStatus = async (taskId: string): Promise<string> => {
   const apiKey = getApiKey();
-  const maxAttempts = 80; // Увеличиваем время ожидания до ~6 минут
+  const maxAttempts = 100; // Увеличиваем лимит попыток
   let attempts = 0;
-  const statusUrl = `${KIE_API_JOBS_BASE}/${taskId}`;
+  
+  // ВАЖНО: Используем правильный эндпоинт из документации
+  const statusUrl = `${KIE_API_JOBS_BASE}/recordInfo?taskId=${taskId}`;
 
-  console.log(`[Task ${taskId}] Поллинг запущен...`);
+  console.log(`[Task ${taskId}] Начинаю опрос по адресу: ${statusUrl}`);
 
   while (attempts < maxAttempts) {
     try {
@@ -30,70 +31,79 @@ export const pollTaskStatus = async (taskId: string): Promise<string> => {
       });
 
       if (!response.ok) {
+        console.warn(`[Task ${taskId}] Ошибка HTTP: ${response.status}`);
         attempts++;
-        await new Promise(r => setTimeout(r, 4000));
+        await new Promise(r => setTimeout(r, 5000));
         continue;
       }
 
       const raw = await response.json();
-      const result = raw.data || raw;
-      const state = (result.state || "").toLowerCase();
       
-      console.log(`[Task ${taskId}] Статус: ${state}`);
+      // Согласно документации, данные лежат в поле "data"
+      if (raw.code !== 200) {
+        console.warn(`[Task ${taskId}] API вернул код ${raw.code}: ${raw.message}`);
+      }
+
+      const result = raw.data;
+      if (!result) {
+        attempts++;
+        await new Promise(r => setTimeout(r, 5000));
+        continue;
+      }
+
+      const state = (result.state || "").toLowerCase();
+      console.log(`[Task ${taskId}] Текущий статус: ${state}`);
 
       if (state === "success" || state === "completed") {
         let foundUrl = "";
         
-        // 1. Пытаемся вытянуть URL из resultJson (как в логах пользователя)
+        // Обработка поля resultJson (строка, содержащая JSON)
         if (result.resultJson) {
           try {
-            // Если resultJson - это строка, парсим её
             const parsed = typeof result.resultJson === 'string' 
               ? JSON.parse(result.resultJson) 
               : result.resultJson;
               
             if (parsed.resultUrls && Array.isArray(parsed.resultUrls) && parsed.resultUrls[0]) {
               foundUrl = parsed.resultUrls[0];
-            } else if (parsed.imageUrl) {
-              foundUrl = parsed.imageUrl;
             }
           } catch (e) {
-            console.warn("[Polling] Ошибка парсинга resultJson:", e);
+            console.warn(`[Task ${taskId}] Ошибка парсинга resultJson:`, e);
           }
         }
 
-        // 2. Запасной путь (если URL лежит в корне объекта data)
+        // Запасные варианты, если URL в другом месте
         if (!foundUrl) {
           foundUrl = result.imageUrl || result.resultUrl || (result.result?.resultUrls ? result.result.resultUrls[0] : "");
         }
         
         if (foundUrl) {
-          console.log(`[Task ${taskId}] Успех! URL найден: ${foundUrl}`);
+          console.log(`[Task ${taskId}] ИЗОБРАЖЕНИЕ ГОТОВО: ${foundUrl}`);
           return foundUrl;
         } else {
-          console.warn(`[Task ${taskId}] Статус success, но URL не найден в ответе. Ответ API:`, result);
+          console.error(`[Task ${taskId}] Статус "success", но URL не найден. Данные:`, result);
         }
       }
 
-      if (state === "failed" || state === "error") {
-        throw new Error(result.failMsg || result.msg || "Ошибка генерации на сервере");
+      if (state === "fail" || state === "failed" || state === "error") {
+        throw new Error(result.failMsg || result.message || "Генерация отклонена сервером.");
       }
 
     } catch (e: any) {
-      console.error("[Polling] Ошибка запроса:", e.message);
-      if (e.message.includes("Ошибка генерации")) throw e;
+      console.error(`[Task ${taskId}] Ошибка при опросе:`, e.message);
+      if (e.message.includes("отклонена")) throw e;
     }
 
-    // Ждем 5 секунд между попытками
-    await new Promise(r => setTimeout(r, 5000));
+    // Ждем 5-6 секунд перед следующим запросом
+    await new Promise(r => setTimeout(r, 6000));
     attempts++;
   }
-  throw new Error("Превышено время ожидания. Попробуйте обновить страницу позже.");
+  throw new Error("Время ожидания истекло. Изображение генерируется слишком долго.");
 };
 
 export const createTask = async (prompt: string, faceUrl: string, callbackUrl?: string): Promise<string> => {
   const apiKey = getApiKey();
-  if (!apiKey) throw new Error("KIE_API_KEY не настроен");
+  if (!apiKey) throw new Error("API KEY (KIE_API_KEY) не найден в окружении.");
 
   const payload: any = {
     model: "google/nano-banana-edit",
@@ -105,10 +115,8 @@ export const createTask = async (prompt: string, faceUrl: string, callbackUrl?: 
     }
   };
 
-  // Передаем callbackUrl в двух вариантах написания для надежности
   if (callbackUrl) {
     payload.callBackUrl = callbackUrl;
-    payload.callback_url = callbackUrl;
   }
 
   const res = await fetch(CREATE_TASK_URL, {
@@ -120,9 +128,14 @@ export const createTask = async (prompt: string, faceUrl: string, callbackUrl?: 
     body: JSON.stringify(payload)
   });
 
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Ошибка API при создании: ${res.status} ${errText}`);
+  }
+
   const data = await res.json();
   const taskId = data.data?.taskId || data.taskId;
   
-  if (!taskId) throw new Error(data.msg || "Не удалось создать задачу");
+  if (!taskId) throw new Error(data.message || "Не удалось получить ID задачи от Kie.ai");
   return taskId;
 };
