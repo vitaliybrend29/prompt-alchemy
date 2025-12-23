@@ -89,11 +89,12 @@ export const startImageGenerationTask = async (
   let payload: any;
 
   if (mode === GenerationMode.NSFC) {
-    // SeeDream 4.5 logic
+    // SeeDream 4.5-edit logic (Uncensored with Image Reference)
     payload = {
-      model: "seedream/4.5-text-to-image",
+      model: "seedream/4.5-edit",
       input: {
         prompt,
+        image_urls: faceUrls, // Согласно документации используем image_urls
         aspect_ratio: aspectRatio,
         quality: resolution === "4K" ? "high" : "basic"
       }
@@ -126,7 +127,10 @@ export const startImageGenerationTask = async (
     };
   }
 
-  if (callbackUrl) payload.callBackUrl = callbackUrl;
+  // Используем callback если домен настроен
+  if (callbackUrl || window.location.hostname !== 'localhost') {
+    payload.callBackUrl = callbackUrl || `https://${window.location.hostname}/api/callback`;
+  }
 
   const res = await fetch(CREATE_TASK_URL, {
     method: "POST",

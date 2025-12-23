@@ -22,6 +22,7 @@ const App: React.FC = () => {
   const [aspectRatio, setAspectRatio] = useState<string>('1:1');
   const [qualityLevel, setQualityLevel] = useState<ResolutionType>("1K");
   const [genMode, setGenMode] = useState<GenerationMode>(GenerationMode.MATCH_STYLE);
+  const [nsfcEnabled, setNsfcEnabled] = useState<boolean>(false);
   const [customSceneText, setCustomSceneText] = useState<string>('');
   const [promptCount, setPromptCount] = useState<number>(3);
   const [history, setHistory] = useState<PromptGroup[]>([]);
@@ -38,7 +39,6 @@ const App: React.FC = () => {
     );
   }, [history]);
 
-  // Обработка Esc для закрытия модалок
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -168,7 +168,8 @@ const App: React.FC = () => {
     setError(null);
     setLoadingState(LoadingState.ANALYZING);
     try {
-      const results = await generatePrompts(styleImages, subjectImages, promptCount, genMode, customSceneText);
+      const currentMode = nsfcEnabled ? GenerationMode.NSFC : genMode;
+      const results = await generatePrompts(styleImages, subjectImages, promptCount, currentMode, customSceneText);
       const newGroup: PromptGroup = {
         id: Date.now().toString(),
         timestamp: Date.now(),
@@ -179,7 +180,7 @@ const App: React.FC = () => {
         })),
         styleReferences: styleImages.map(i => i.publicUrl!).filter(Boolean),
         subjectReferences: subjectImages.map(i => i.publicUrl!).filter(Boolean),
-        mode: genMode,
+        mode: currentMode,
       };
       setHistory(prev => [newGroup, ...prev]);
       setLoadingState(LoadingState.IDLE);
@@ -241,7 +242,6 @@ const App: React.FC = () => {
             className="bg-[#0e111a] border border-white/10 w-full max-w-7xl h-full max-h-[90vh] rounded-[3rem] overflow-hidden flex flex-col shadow-[0_0_100px_rgba(0,0,0,0.8)]"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Vault Header */}
             <div className="px-10 py-8 border-b border-white/5 flex items-center justify-between bg-black/20">
               <div className="flex items-center gap-5">
                 <div className="p-3.5 bg-indigo-600/10 rounded-2xl border border-indigo-500/20 text-indigo-400">
@@ -260,7 +260,6 @@ const App: React.FC = () => {
               </button>
             </div>
 
-            {/* Vault Grid */}
             <div className="flex-grow overflow-y-auto p-10 custom-scrollbar">
               {allGeneratedImages.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center opacity-20">
@@ -327,17 +326,32 @@ const App: React.FC = () => {
             <h1 className="text-sm font-black uppercase tracking-widest text-white italic">Alchemist Engine</h1>
           </div>
           
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
+            {/* Глобальный переключатель NSFC - Компактный и аккуратный */}
+            <button 
+              onClick={() => setNsfcEnabled(!nsfcEnabled)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-full transition-all text-[9px] font-black uppercase tracking-[0.2em] border shadow-xl ${
+                nsfcEnabled 
+                ? 'bg-red-600 border-red-400 text-white animate-pulse shadow-red-600/20 scale-105' 
+                : 'bg-white/5 border-white/10 text-slate-500 hover:bg-white/10 hover:text-slate-300'
+              }`}
+            >
+              <TrashIcon className={`w-3 h-3 ${nsfcEnabled ? 'text-white' : 'text-slate-600'}`} />
+              NSFC {nsfcEnabled ? 'ON' : 'OFF'}
+            </button>
+
+            <div className="w-px h-6 bg-white/10 mx-1"></div>
+
             <button 
               onClick={() => setShowVault(true)}
               className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-indigo-600/20 text-slate-300 hover:text-indigo-400 border border-white/5 rounded-full transition-all text-[10px] font-black uppercase tracking-widest"
             >
               <GridIcon className="w-3.5 h-3.5" />
-              Open Vault <span className="opacity-40">({allGeneratedImages.length})</span>
+              Vault ({allGeneratedImages.length})
             </button>
-            <div className="w-px h-4 bg-white/10 mx-1"></div>
-            <button onClick={() => setHistory([])} className="text-[10px] font-bold text-slate-600 hover:text-red-400 uppercase tracking-widest transition-colors flex items-center gap-2">
-              <TrashIcon className="w-3 h-3" /> Clear Lab
+            
+            <button onClick={() => setHistory([])} className="text-[10px] font-bold text-slate-600 hover:text-red-400 uppercase tracking-widest transition-colors flex items-center gap-2 px-2">
+              <TrashIcon className="w-3 h-3" /> Clear
             </button>
           </div>
         </div>
@@ -375,7 +389,6 @@ const App: React.FC = () => {
                   { id: GenerationMode.MATCH_STYLE, label: 'Match Style', icon: <ImageIcon className="w-4 h-4" /> },
                   { id: GenerationMode.CUSTOM_SCENE, label: 'Custom Scene', icon: <WandIcon className="w-4 h-4" /> },
                   { id: GenerationMode.CHARACTER_SHEET, label: 'Character Sheet', icon: <GridIcon className="w-4 h-4" /> },
-                  { id: GenerationMode.NSFC, label: 'NSFC (No Censorship)', icon: <TrashIcon className="w-4 h-4 text-red-500" /> },
                   { id: GenerationMode.RANDOM_CREATIVE, label: 'Creative Mix', icon: <SparklesIcon className="w-4 h-4" /> },
                 ].map(mode => (
                   <button 
@@ -454,8 +467,8 @@ const App: React.FC = () => {
                   </button>
                 ))}
               </div>
-              {genMode === GenerationMode.NSFC && (
-                <p className="mt-2 text-[8px] font-black text-indigo-400/60 uppercase tracking-widest text-center">SeeDream: Basic (2K) / High (4K)</p>
+              {nsfcEnabled && (
+                <p className="mt-2 text-[8px] font-black text-red-500/60 uppercase tracking-widest text-center">Using SeeDream 4.5 Edit (No Censorship)</p>
               )}
             </div>
 
@@ -463,7 +476,7 @@ const App: React.FC = () => {
               onClick={runPromptEngineeringProcess} 
               disabled={loadingState === LoadingState.ANALYZING} 
               className={`w-full py-5 rounded-full font-black text-xs uppercase tracking-[0.2em] transition-all active:scale-95 disabled:opacity-20 shadow-2xl ${
-                genMode === GenerationMode.NSFC ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-white text-black hover:bg-indigo-600 hover:text-white'
+                nsfcEnabled ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-white text-black hover:bg-indigo-600 hover:text-white'
               }`}
             >
               {loadingState === LoadingState.ANALYZING ? 'Processing...' : 'Generate Prompts'}
