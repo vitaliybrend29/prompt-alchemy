@@ -4,7 +4,7 @@ import ImageUploader from './components/ImageUploader';
 import { UploadedImage, LoadingState, GenerationMode, PromptGroup, GeneratedPrompt } from './types';
 import { generatePrompts } from './services/geminiService';
 import { startImageGenerationTask, monitorTaskProgress } from './services/imageGenerationService';
-import { WandIcon, CopyIcon, SparklesIcon, ImageIcon, UserIcon, TrashIcon, GridIcon, PlayIcon } from './components/Icons';
+import { WandIcon, CopyIcon, SparklesIcon, ImageIcon, UserIcon, TrashIcon, GridIcon, PlayIcon, DownloadIcon } from './components/Icons';
 
 type ResolutionType = "Standard" | "1K" | "2K" | "4K";
 
@@ -29,42 +29,81 @@ const App: React.FC = () => {
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   useEffect(() => {
-    const saved = localStorage.getItem('alchemy_v10_history');
+    const saved = localStorage.getItem('alchemy_v11_history');
     if (saved) {
       try {
         const parsed: PromptGroup[] = JSON.parse(saved);
         setHistory(parsed);
         parsed.forEach(group => {
           group.prompts.forEach(p => {
-            if (p.taskId && !p.generatedImageUrls && !p.error) {
+            if (p.taskId && !p.generatedImageUrls?.length && !p.error) {
               resumeMonitoringProcess(group.id, p.id, p.taskId);
             }
           });
         });
-      } catch (e) { localStorage.removeItem('alchemy_v10_history'); }
+      } catch (e) { localStorage.removeItem('alchemy_v11_history'); }
     }
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('alchemy_v10_history', JSON.stringify(history.slice(0, 50)));
+    localStorage.setItem('alchemy_v11_history', JSON.stringify(history.slice(0, 50)));
   }, [history]);
 
+  /**
+   * Скачивание изображения на устройство
+   */
+  const handleDownload = async (url: string) => {
+    try {
+      const response = await fetch(url);
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = `alchemist-render-${Date.now()}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      console.error("Download failed:", err);
+      window.open(url, '_blank');
+    }
+  };
+
+  /**
+   * Возобновление слежения за задачей
+   */
   const resumeMonitoringProcess = async (groupId: string, promptId: string, taskId: string) => {
     updatePromptUI(groupId, promptId, { isGenerating: true, taskId });
     try {
       const urls = await monitorTaskProgress(taskId);
-      updatePromptUI(groupId, promptId, { isGenerating: false, generatedImageUrls: urls });
+      // При получении новых URL - добавляем их в массив, а не заменяем
+      updatePromptUI(groupId, promptId, (prev) => ({
+        isGenerating: false,
+        generatedImageUrls: [...(prev.generatedImageUrls || []), ...urls]
+      }));
     } catch (err: any) {
       updatePromptUI(groupId, promptId, { isGenerating: false, error: err.message });
     }
   };
 
-  const updatePromptUI = (groupId: string, promptId: string, updates: Partial<GeneratedPrompt>) => {
+  /**
+   * Универсальная функция обновления промпта, поддерживает функцию-обработчик для объединения данных
+   */
+  const updatePromptUI = (
+    groupId: string, 
+    promptId: string, 
+    updates: Partial<GeneratedPrompt> | ((p: GeneratedPrompt) => Partial<GeneratedPrompt>)
+  ) => {
     setHistory(prev => prev.map(group => {
       if (group.id !== groupId) return group;
       return {
         ...group,
-        prompts: group.prompts.map(p => p.id === promptId ? { ...p, ...updates } : p)
+        prompts: group.prompts.map(p => {
+          if (p.id !== promptId) return p;
+          const res = typeof updates === 'function' ? updates(p) : updates;
+          return { ...p, ...res };
+        })
       };
     }));
   };
@@ -136,69 +175,53 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-[#06080d] text-slate-300 font-sans">
       {previewImage && (
-        <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-4" onClick={() => setPreviewImage(null)}>
-          <img src={previewImage} className="max-w-full max-h-full rounded shadow-2xl animate-in zoom-in-95 duration-300" />
+        <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setPreviewImage(null)}>
+          <img src={previewImage} className="max-w-full max-h-full rounded-lg shadow-2xl animate-in zoom-in-95 duration-300" />
         </div>
       )}
 
       <header className="sticky top-0 z-40 bg-[#06080d]/90 backdrop-blur-lg border-b border-white/5 px-6 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-indigo-600 rounded-lg">
+            <div className="p-2 bg-indigo-600 rounded-lg shadow-lg shadow-indigo-600/20">
               <SparklesIcon className="w-5 h-5 text-white" />
             </div>
-            <h1 className="text-sm font-black uppercase tracking-widest text-white italic">Alchemist v10</h1>
+            <h1 className="text-sm font-black uppercase tracking-widest text-white italic">Alchemist Engine</h1>
           </div>
           <button onClick={() => setHistory([])} className="text-[10px] font-bold text-slate-600 hover:text-red-400 uppercase tracking-widest transition-colors flex items-center gap-2">
-            <TrashIcon className="w-3 h-3" /> Reset History
+            <TrashIcon className="w-3 h-3" /> Clear Lab
           </button>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-6 mt-8 grid grid-cols-1 lg:grid-cols-12 gap-10 pb-20">
         
-        {/* Панель функций и настроек */}
+        {/* Панель настроек */}
         <div className="lg:col-span-4 space-y-6">
-          <div className="bg-[#0e111a] border border-white/5 rounded-3xl p-8 shadow-2xl sticky top-24 space-y-10">
+          <div className="bg-[#0e111a] border border-white/5 rounded-3xl p-8 shadow-2xl sticky top-24 space-y-8">
             
-            {/* 1. Загрузка фото (Перенесено наверх) */}
-            <div className="space-y-8">
+            <ImageUploader 
+              label="1. Target Identity" 
+              images={subjectImages} 
+              onImagesUpload={handleIdentityImagesUpload} 
+              onRemove={id => setSubjectImages(p => p.filter(i => i.id !== id))} 
+              icon={<UserIcon className="w-4 h-4 text-indigo-400" />} 
+              maxCount={8} 
+            />
+
+            {genMode === GenerationMode.MATCH_STYLE && (
               <ImageUploader 
-                label="Target Identity (Faces)" 
-                images={subjectImages} 
-                onImagesUpload={handleIdentityImagesUpload} 
-                onRemove={id => setSubjectImages(p => p.filter(i => i.id !== id))} 
-                icon={<UserIcon className="w-4 h-4 text-indigo-400" />} 
-                maxCount={8} 
+                label="2. Style Reference" 
+                images={styleImages} 
+                onImagesUpload={imgs => setStyleImages(p => [...p, ...imgs].slice(0, 3))} 
+                onRemove={id => setStyleImages(p => p.filter(i => i.id !== id))} 
+                icon={<ImageIcon className="w-4 h-4 text-emerald-400" />} 
+                maxCount={3}
               />
+            )}
 
-              {genMode === GenerationMode.MATCH_STYLE && (
-                <ImageUploader 
-                  label="Style Reference" 
-                  images={styleImages} 
-                  onImagesUpload={imgs => setStyleImages(p => [...p, ...imgs].slice(0, 3))} 
-                  onRemove={id => setStyleImages(p => p.filter(i => i.id !== id))} 
-                  icon={<ImageIcon className="w-4 h-4 text-emerald-400" />} 
-                  maxCount={3}
-                />
-              )}
-
-              {genMode === GenerationMode.CUSTOM_SCENE && (
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Custom Scene Context</label>
-                  <textarea 
-                    value={customSceneText} 
-                    onChange={e => setCustomSceneText(e.target.value)}
-                    placeholder="Describe your scene context..."
-                    className="w-full bg-black/40 border border-white/5 rounded-2xl p-4 text-xs italic text-slate-300 focus:border-indigo-500 transition-colors h-24 resize-none outline-none"
-                  />
-                </div>
-              )}
-            </div>
-
-            {/* 2. Выбор режима (Теперь под фотками) */}
             <div>
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4 block">Select Function Mode</label>
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4 block">3. Select Mode</label>
               <div className="grid grid-cols-2 gap-3">
                 {[
                   { id: GenerationMode.MATCH_STYLE, label: 'Match Style', icon: <ImageIcon className="w-4 h-4" /> },
@@ -220,9 +243,8 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            {/* 3. Соотношение сторон */}
             <div>
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4 block">Aspect Ratio</label>
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4 block">4. Aspect Ratio</label>
               <div className="grid grid-cols-5 gap-2">
                 {ASPECT_RATIOS.map(r => (
                   <button
@@ -239,16 +261,15 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            {/* 4. Выбор качества */}
             <div>
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4 block">Engine Quality (Banana Pro)</label>
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4 block">5. Render Quality</label>
               <div className="grid grid-cols-4 gap-2 p-1.5 bg-black/40 rounded-2xl border border-white/5">
                 {(["Standard", "1K", "2K", "4K"] as ResolutionType[]).map(res => (
                   <button
                     key={res}
                     onClick={() => setQualityLevel(res)}
                     className={`py-2 rounded-xl text-[10px] font-black transition-all ${
-                      qualityLevel === res ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:text-slate-300'
+                      qualityLevel === res ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 hover:text-slate-300'
                     }`}
                   >
                     {res}
@@ -262,10 +283,9 @@ const App: React.FC = () => {
               disabled={loadingState === LoadingState.ANALYZING} 
               className="w-full py-5 bg-white text-black rounded-full font-black text-xs uppercase tracking-[0.2em] hover:bg-indigo-600 hover:text-white transition-all active:scale-95 disabled:opacity-20 shadow-2xl"
             >
-              {loadingState === LoadingState.ANALYZING ? 'Forging Prompts...' : 'Generate Prompts'}
+              {loadingState === LoadingState.ANALYZING ? 'Processing...' : 'Generate Prompts'}
             </button>
             {error && <p className="text-[10px] text-red-400 text-center font-black uppercase italic">! {error}</p>}
-
           </div>
         </div>
 
@@ -274,7 +294,7 @@ const App: React.FC = () => {
           {history.length === 0 && (
             <div className="flex flex-col items-center justify-center py-40 border border-dashed border-white/5 rounded-[3rem] opacity-20">
               <SparklesIcon className="w-16 h-16 mb-6" />
-              <p className="text-xs font-black uppercase tracking-[0.4em]">Laboratory Standing By</p>
+              <p className="text-xs font-black uppercase tracking-[0.4em]">Ready for Transmutation</p>
             </div>
           )}
 
@@ -288,19 +308,19 @@ const App: React.FC = () => {
 
               <div className="space-y-6">
                 {group.prompts.map(p => (
-                  <div key={p.id} className="bg-[#0e111a]/40 border border-white/5 rounded-[2.5rem] p-8 hover:bg-[#0e111a] transition-all">
+                  <div key={p.id} className="bg-[#0e111a]/40 border border-white/5 rounded-[2.5rem] p-8 hover:bg-[#0e111a] transition-all group/card">
                     <div className="flex flex-col md:flex-row gap-8">
-                      <div className="w-20 h-20 rounded-2xl overflow-hidden border border-white/10 shrink-0 bg-black shadow-inner">
-                        {p.referenceImage ? <img src={p.referenceImage} className="w-full h-full object-cover grayscale opacity-50" /> : <div className="w-full h-full flex items-center justify-center opacity-10"><ImageIcon className="w-8 h-8" /></div>}
+                      <div className="w-24 h-24 rounded-2xl overflow-hidden border border-white/10 shrink-0 bg-black shadow-inner">
+                        {p.referenceImage ? <img src={p.referenceImage} className="w-full h-full object-cover grayscale opacity-40 group-hover/card:opacity-60 transition-opacity" /> : <div className="w-full h-full flex items-center justify-center opacity-10"><ImageIcon className="w-8 h-8" /></div>}
                       </div>
 
                       <div className="flex-grow flex flex-col justify-between py-1">
                         <div className="space-y-6">
                           <div className="flex items-start justify-between gap-6">
-                            <p className="text-[13px] leading-relaxed text-slate-300 italic font-medium">"{p.text}"</p>
+                            <p className="text-sm leading-relaxed text-slate-300 italic font-medium">"{p.text}"</p>
                             <div className="flex gap-2 shrink-0">
-                              <button onClick={() => navigator.clipboard.writeText(p.text)} className="p-3 bg-white/5 hover:bg-white/10 rounded-xl text-slate-500 hover:text-white transition-all"><CopyIcon className="w-4 h-4" /></button>
-                              <button onClick={() => deleteSinglePromptFromHistory(group.id, p.id)} className="p-3 bg-white/5 hover:bg-red-500/20 rounded-xl text-slate-500 hover:text-red-400 transition-all"><TrashIcon className="w-4 h-4" /></button>
+                              <button onClick={() => navigator.clipboard.writeText(p.text)} title="Copy Prompt" className="p-3 bg-white/5 hover:bg-white/10 rounded-xl text-slate-500 hover:text-white transition-all"><CopyIcon className="w-4 h-4" /></button>
+                              <button onClick={() => deleteSinglePromptFromHistory(group.id, p.id)} title="Delete Prompt" className="p-3 bg-white/5 hover:bg-red-500/20 rounded-xl text-slate-500 hover:text-red-400 transition-all"><TrashIcon className="w-4 h-4" /></button>
                             </div>
                           </div>
                           <div className="flex items-center gap-4">
@@ -311,26 +331,42 @@ const App: React.FC = () => {
                                 p.isGenerating ? 'bg-slate-800 text-slate-500' : 'bg-indigo-600 text-white shadow-xl hover:scale-105 active:scale-95 shadow-indigo-600/20'
                               }`}
                             >
-                              {p.isGenerating ? 'Rendering...' : `Render ${qualityLevel}`}
+                              {p.isGenerating ? 'Rendering...' : `Render in ${qualityLevel}`}
                             </button>
-                            {p.error && <span className="text-[9px] text-red-400 font-black bg-red-400/10 px-4 py-1.5 rounded-full border border-red-400/20 uppercase">Error: {p.error}</span>}
+                            {p.error && <span className="text-[9px] text-red-400 font-black bg-red-400/10 px-4 py-1.5 rounded-full border border-red-400/20 uppercase">! {p.error}</span>}
                           </div>
                         </div>
 
+                        {/* Кумулятивная галерея всех результатов */}
                         {p.generatedImageUrls && p.generatedImageUrls.length > 0 && (
                           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-8 animate-in slide-in-from-top-4 duration-700">
                             {p.generatedImageUrls.map((url, idx) => (
-                              <div key={idx} className="relative aspect-square group/img rounded-3xl overflow-hidden border border-white/5 shadow-2xl cursor-pointer" onClick={() => setPreviewImage(url)}>
+                              <div key={idx} className="relative aspect-square group/img rounded-3xl overflow-hidden border border-white/5 shadow-2xl bg-black">
                                 <img src={url} className="w-full h-full object-cover transition-all duration-1000 group-hover/img:scale-110" />
-                                <div className="absolute inset-0 bg-indigo-600/30 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center">
-                                  <PlayIcon className="w-8 h-8 text-white fill-current" />
+                                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover/img:opacity-100 transition-opacity flex flex-col items-center justify-center gap-3">
+                                  <div className="flex gap-2">
+                                    <button 
+                                      onClick={() => setPreviewImage(url)} 
+                                      className="p-3 bg-white/10 hover:bg-indigo-600 rounded-full text-white transition-all shadow-lg"
+                                      title="Preview"
+                                    >
+                                      <PlayIcon className="w-5 h-5 fill-current" />
+                                    </button>
+                                    <button 
+                                      onClick={() => handleDownload(url)} 
+                                      className="p-3 bg-white/10 hover:bg-emerald-600 rounded-full text-white transition-all shadow-lg"
+                                      title="Download"
+                                    >
+                                      <DownloadIcon className="w-5 h-5" />
+                                    </button>
+                                  </div>
                                 </div>
                               </div>
                             ))}
                           </div>
                         )}
 
-                        {p.isGenerating && !p.generatedImageUrls && (
+                        {p.isGenerating && (
                           <div className="h-40 flex flex-col items-center justify-center gap-4 mt-8 bg-black/20 rounded-[2rem] border border-dashed border-white/5">
                             <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
                             <span className="text-[9px] font-black uppercase tracking-[0.3em] text-indigo-500 animate-pulse">Alchemy in progress...</span>
