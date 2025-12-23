@@ -23,12 +23,12 @@ const App: React.FC = () => {
   const [qualityLevel, setQualityLevel] = useState<ResolutionType>("1K");
   const [genMode, setGenMode] = useState<GenerationMode>(GenerationMode.MATCH_STYLE);
   const [customSceneText, setCustomSceneText] = useState<string>('');
+  const [promptCount, setPromptCount] = useState<number>(3);
   const [history, setHistory] = useState<PromptGroup[]>([]);
   const [loadingState, setLoadingState] = useState<LoadingState>(LoadingState.IDLE);
   const [error, setError] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   
-  // Состояние для мульти-выбора
   const [selectedPrompts, setSelectedPrompts] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -149,7 +149,8 @@ const App: React.FC = () => {
     setError(null);
     setLoadingState(LoadingState.ANALYZING);
     try {
-      const results = await generatePrompts(styleImages, subjectImages, 3, genMode, customSceneText);
+      // Каждый стиль теперь анализируется отдельно в GeminiService
+      const results = await generatePrompts(styleImages, subjectImages, promptCount, genMode, customSceneText);
       const newGroup: PromptGroup = {
         id: Date.now().toString(),
         timestamp: Date.now(),
@@ -196,7 +197,7 @@ const App: React.FC = () => {
     for (const item of promptsToRender) {
       executeImageRender(item.groupId, item.promptId);
     }
-    setSelectedPrompts(new Set()); // Сброс выбора после запуска
+    setSelectedPrompts(new Set()); 
   };
 
   return (
@@ -207,7 +208,6 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Floating Bulk Action Bar */}
       {selectedPrompts.size > 0 && (
         <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 bg-indigo-600 px-6 py-4 rounded-full shadow-2xl flex items-center gap-8 animate-in slide-in-from-bottom-10 duration-300">
           <span className="text-xs font-black uppercase tracking-widest text-white whitespace-nowrap">
@@ -246,7 +246,6 @@ const App: React.FC = () => {
 
       <main className="max-w-7xl mx-auto px-6 mt-8 grid grid-cols-1 lg:grid-cols-12 gap-10 pb-20">
         
-        {/* Панель настроек */}
         <div className="lg:col-span-4 space-y-6">
           <div className="bg-[#0e111a] border border-white/5 rounded-3xl p-8 shadow-2xl sticky top-24 space-y-8">
             
@@ -299,14 +298,31 @@ const App: React.FC = () => {
                 <textarea 
                   value={customSceneText} 
                   onChange={e => setCustomSceneText(e.target.value)}
-                  placeholder="Describe where the person should be (e.g. 'walking in a neon cyberpunk alleyway')..."
+                  placeholder="Describe where the person should be..."
                   className="w-full bg-black/40 border border-white/5 rounded-2xl p-4 text-xs italic text-slate-300 focus:border-indigo-500 transition-colors h-24 resize-none outline-none"
                 />
               </div>
             )}
 
             <div>
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4 block">4. Aspect Ratio</label>
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4 block">4. Prompt Quantity (Per Style)</label>
+              <div className="grid grid-cols-3 gap-2 p-1.5 bg-black/40 rounded-2xl border border-white/5">
+                {[1, 3, 5].map(c => (
+                  <button
+                    key={c}
+                    onClick={() => setPromptCount(c)}
+                    className={`py-2 rounded-xl text-[10px] font-black transition-all ${
+                      promptCount === c ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 hover:text-slate-300'
+                    }`}
+                  >
+                    {c} {c === 1 ? 'Prompt' : 'Prompts'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4 block">5. Aspect Ratio</label>
               <div className="grid grid-cols-5 gap-2">
                 {ASPECT_RATIOS.map(r => (
                   <button
@@ -324,7 +340,7 @@ const App: React.FC = () => {
             </div>
 
             <div>
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4 block">5. Render Quality</label>
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4 block">6. Render Quality</label>
               <div className="grid grid-cols-4 gap-2 p-1.5 bg-black/40 rounded-2xl border border-white/5">
                 {(["Standard", "1K", "2K", "4K"] as ResolutionType[]).map(res => (
                   <button
@@ -351,7 +367,6 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        {/* Результаты */}
         <div className="lg:col-span-8 space-y-12">
           {history.length === 0 && (
             <div className="flex flex-col items-center justify-center py-40 border border-dashed border-white/5 rounded-[3rem] opacity-20">
@@ -382,7 +397,6 @@ const App: React.FC = () => {
                       selectedPrompts.has(p.id) ? 'border-indigo-500/50 bg-[#0e111a]' : 'border-white/5 hover:bg-[#0e111a]'
                     }`}
                   >
-                    {/* Checkbox for selection */}
                     <div 
                       onClick={() => togglePromptSelection(p.id)}
                       className={`absolute top-6 left-6 w-5 h-5 rounded-full border-2 cursor-pointer transition-all z-10 flex items-center justify-center ${
@@ -420,7 +434,6 @@ const App: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* Кумулятивная галерея всех результатов */}
                         {p.generatedImageUrls && p.generatedImageUrls.length > 0 && (
                           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-8 animate-in slide-in-from-top-4 duration-700">
                             {p.generatedImageUrls.map((url, idx) => (
