@@ -4,7 +4,7 @@ import ImageUploader from './components/ImageUploader';
 import { UploadedImage, LoadingState, GenerationMode, PromptGroup, GeneratedPrompt } from './types';
 import { generatePrompts } from './services/geminiService';
 import { startImageGenerationTask, monitorTaskProgress } from './services/imageGenerationService';
-import { WandIcon, CopyIcon, SparklesIcon, ImageIcon, UserIcon, TrashIcon, GridIcon, PlayIcon, DownloadIcon, XIcon } from './components/Icons';
+import { WandIcon, CopyIcon, SparklesIcon, ImageIcon, UserIcon, TrashIcon, GridIcon, PlayIcon, DownloadIcon, XIcon, SettingsIcon } from './components/Icons';
 
 type ResolutionType = "Standard" | "1K" | "2K" | "4K";
 
@@ -195,7 +195,7 @@ const App: React.FC = () => {
     if (!prompt || prompt.isGenerating || !group) return;
 
     try {
-      const taskId = await startImageGenerationTask(prompt.text, group.subjectReferences, aspectRatio, qualityLevel);
+      const taskId = await startImageGenerationTask(prompt.text, group.subjectReferences, aspectRatio, qualityLevel, group.mode);
       resumeMonitoringProcess(groupId, promptId, taskId);
     } catch (err: any) {
       updatePromptUI(groupId, promptId, { error: err.message });
@@ -375,6 +375,7 @@ const App: React.FC = () => {
                   { id: GenerationMode.MATCH_STYLE, label: 'Match Style', icon: <ImageIcon className="w-4 h-4" /> },
                   { id: GenerationMode.CUSTOM_SCENE, label: 'Custom Scene', icon: <WandIcon className="w-4 h-4" /> },
                   { id: GenerationMode.CHARACTER_SHEET, label: 'Character Sheet', icon: <GridIcon className="w-4 h-4" /> },
+                  { id: GenerationMode.NSFC, label: 'NSFC (No Censorship)', icon: <TrashIcon className="w-4 h-4 text-red-500" /> },
                   { id: GenerationMode.RANDOM_CREATIVE, label: 'Creative Mix', icon: <SparklesIcon className="w-4 h-4" /> },
                 ].map(mode => (
                   <button 
@@ -453,12 +454,17 @@ const App: React.FC = () => {
                   </button>
                 ))}
               </div>
+              {genMode === GenerationMode.NSFC && (
+                <p className="mt-2 text-[8px] font-black text-indigo-400/60 uppercase tracking-widest text-center">SeeDream: Basic (2K) / High (4K)</p>
+              )}
             </div>
 
             <button 
               onClick={runPromptEngineeringProcess} 
               disabled={loadingState === LoadingState.ANALYZING} 
-              className="w-full py-5 bg-white text-black rounded-full font-black text-xs uppercase tracking-[0.2em] hover:bg-indigo-600 hover:text-white transition-all active:scale-95 disabled:opacity-20 shadow-2xl"
+              className={`w-full py-5 rounded-full font-black text-xs uppercase tracking-[0.2em] transition-all active:scale-95 disabled:opacity-20 shadow-2xl ${
+                genMode === GenerationMode.NSFC ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-white text-black hover:bg-indigo-600 hover:text-white'
+              }`}
             >
               {loadingState === LoadingState.ANALYZING ? 'Processing...' : 'Generate Prompts'}
             </button>
@@ -485,7 +491,7 @@ const App: React.FC = () => {
                 >
                   Select All
                 </button>
-                <span className="text-[9px] font-black text-slate-600 uppercase tracking-[0.3em]">{group.mode}</span>
+                <span className={`text-[9px] font-black uppercase tracking-[0.3em] ${group.mode === GenerationMode.NSFC ? 'text-red-500' : 'text-slate-600'}`}>{group.mode}</span>
               </div>
 
               <div className="space-y-6">
@@ -524,10 +530,10 @@ const App: React.FC = () => {
                               onClick={() => executeImageRender(group.id, p.id)} 
                               disabled={p.isGenerating}
                               className={`px-10 py-3 rounded-full text-[10px] font-black uppercase tracking-[0.2em] transition-all ${
-                                p.isGenerating ? 'bg-slate-800 text-slate-500' : 'bg-indigo-600 text-white shadow-xl hover:scale-105 active:scale-95 shadow-indigo-600/20'
+                                p.isGenerating ? 'bg-slate-800 text-slate-500' : (group.mode === GenerationMode.NSFC ? 'bg-red-600' : 'bg-indigo-600') + ' text-white shadow-xl hover:scale-105 active:scale-95'
                               }`}
                             >
-                              {p.isGenerating ? 'Rendering...' : `Render in ${qualityLevel}`}
+                              {p.isGenerating ? 'Rendering...' : `Render (${group.mode === GenerationMode.NSFC ? 'SeeDream' : qualityLevel})`}
                             </button>
                             {p.error && <span className="text-[9px] text-red-400 font-black bg-red-400/10 px-4 py-1.5 rounded-full border border-red-400/20 uppercase">! {p.error}</span>}
                           </div>
@@ -563,8 +569,8 @@ const App: React.FC = () => {
 
                         {p.isGenerating && (
                           <div className="h-40 flex flex-col items-center justify-center gap-4 mt-8 bg-black/20 rounded-[2rem] border border-dashed border-white/5">
-                            <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-                            <span className="text-[9px] font-black uppercase tracking-[0.3em] text-indigo-500 animate-pulse">Alchemy in progress...</span>
+                            <div className={`w-8 h-8 border-2 border-t-transparent rounded-full animate-spin ${group.mode === GenerationMode.NSFC ? 'border-red-500' : 'border-indigo-500'}`}></div>
+                            <span className={`text-[9px] font-black uppercase tracking-[0.3em] animate-pulse ${group.mode === GenerationMode.NSFC ? 'text-red-500' : 'text-indigo-500'}`}>Alchemy in progress...</span>
                           </div>
                         )}
                       </div>

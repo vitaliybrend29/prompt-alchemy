@@ -1,4 +1,6 @@
 
+import { GenerationMode } from "../types";
+
 const KIE_API_JOBS_BASE = "https://api.kie.ai/api/v1/jobs";
 const CREATE_TASK_URL = `${KIE_API_JOBS_BASE}/createTask`;
 
@@ -72,44 +74,59 @@ export const monitorTaskProgress = async (taskId: string): Promise<string[]> => 
 
 /**
  * Запускает создание изображения.
- * @param resolution - Разрешение для Pro модели (1K, 2K, 4K)
  */
 export const startImageGenerationTask = async (
   prompt: string, 
   faceUrls: string[], 
   aspectRatio: string = "1:1", 
   resolution: "Standard" | "1K" | "2K" | "4K" = "1K",
+  mode: GenerationMode = GenerationMode.MATCH_STYLE,
   callbackUrl?: string
 ): Promise<string> => {
   const apiKey = getApiKeyFromEnv();
   if (!apiKey) throw new Error("API KEY missing");
 
-  const isPro = resolution !== "Standard";
-  let inputPayload: any;
+  let payload: any;
 
-  if (isPro) {
-    inputPayload = {
-      prompt,
-      aspect_ratio: aspectRatio,
-      resolution: resolution, // Передаем 1K, 2K или 4K
-      image_input: faceUrls,
-      output_format: "png"
+  if (mode === GenerationMode.NSFC) {
+    // SeeDream 4.5 logic
+    payload = {
+      model: "seedream/4.5-text-to-image",
+      input: {
+        prompt,
+        aspect_ratio: aspectRatio,
+        quality: resolution === "4K" ? "high" : "basic"
+      }
     };
   } else {
-    inputPayload = {
-      prompt,
-      image_size: aspectRatio,
-      image_urls: faceUrls,
-      output_format: "png"
+    // Nano Banana logic
+    const isPro = resolution !== "Standard";
+    let inputPayload: any;
+
+    if (isPro) {
+      inputPayload = {
+        prompt,
+        aspect_ratio: aspectRatio,
+        resolution: resolution,
+        image_input: faceUrls,
+        output_format: "png"
+      };
+    } else {
+      inputPayload = {
+        prompt,
+        image_size: aspectRatio,
+        image_urls: faceUrls,
+        output_format: "png"
+      };
+    }
+
+    payload = {
+      model: isPro ? "nano-banana-pro" : "google/nano-banana-edit",
+      input: inputPayload
     };
   }
 
-  const payload = {
-    model: isPro ? "nano-banana-pro" : "google/nano-banana-edit",
-    input: inputPayload
-  };
-
-  if (callbackUrl) (payload as any).callBackUrl = callbackUrl;
+  if (callbackUrl) payload.callBackUrl = callbackUrl;
 
   const res = await fetch(CREATE_TASK_URL, {
     method: "POST",

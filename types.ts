@@ -14,6 +14,7 @@ export enum GenerationMode {
   RANDOM_CREATIVE = 'RANDOM_CREATIVE',
   CUSTOM_SCENE = 'CUSTOM_SCENE',
   CHARACTER_SHEET = 'CHARACTER_SHEET',
+  NSFC = 'NSFC',
 }
 
 export interface GeneratedPrompt {
