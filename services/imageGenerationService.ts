@@ -3,10 +3,8 @@
  * Сервис для генерации изображений через Kie.ai API
  */
 
-const KIE_API_V1 = "https://api.kie.ai/api/v1/jobs";
-const CREATE_TASK_URL = `${KIE_API_V1}/createTask`;
-// По наиболее актуальным данным для этой версии API:
-const STATUS_URL = `${KIE_API_V1}/status`; 
+const KIE_API_JOBS_BASE = "https://api.kie.ai/api/v1/jobs";
+const CREATE_TASK_URL = `${KIE_API_JOBS_BASE}/createTask`;
 
 // Безопасное получение ключа
 const getApiKey = () => {
@@ -17,18 +15,21 @@ const getApiKey = () => {
 
 /**
  * Опрашивает статус задачи до завершения или ошибки.
+ * В Kie.ai статус часто проверяется через GET /api/v1/jobs/{taskId}
  */
 const pollTaskStatus = async (taskId: string): Promise<string> => {
   const apiKey = getApiKey();
   const maxAttempts = 60; 
   let attempts = 0;
 
-  console.log(`Starting polling for task: ${taskId}`);
+  // URL вида https://api.kie.ai/api/v1/jobs/ВАШ_ID
+  const statusUrl = `${KIE_API_JOBS_BASE}/${taskId}`;
+
+  console.log(`Starting polling for task: ${taskId} at ${statusUrl}`);
 
   while (attempts < maxAttempts) {
     try {
-      // Пробуем GET запрос с параметром в query string - это стандарт для /status
-      const response = await fetch(`${STATUS_URL}?taskId=${taskId}`, {
+      const response = await fetch(statusUrl, {
         method: "GET",
         headers: {
           "Authorization": `Bearer ${apiKey}`,
@@ -36,17 +37,18 @@ const pollTaskStatus = async (taskId: string): Promise<string> => {
       });
 
       if (!response.ok) {
-        // Если 404 - задача еще не зарегистрирована в системе статусов, это нормально
+        // Если 404 - задача еще "прогревается" или не создана в БД статусов.
+        // Для Kie.ai это нормально в первые 10-20 секунд.
         if (response.status === 404) {
-          console.log(`Task ${taskId} not found yet (404), waiting...`);
+          console.log(`Attempt ${attempts}: Task not found (404), retrying in 5s...`);
           attempts++;
           await new Promise(resolve => setTimeout(resolve, 5000));
           continue;
         }
         
-        // Если 405, значит статус проверяется через POST
+        // Если 405 (Method Not Allowed), пробуем POST на тот же URL (некоторые прокси требуют POST)
         if (response.status === 405) {
-            const postResponse = await fetch(STATUS_URL, {
+            const postResponse = await fetch(statusUrl, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -58,7 +60,7 @@ const pollTaskStatus = async (taskId: string): Promise<string> => {
             return handleTaskData(postResult.data || postResult);
         }
 
-        throw new Error(`HTTP Error: ${response.status}`);
+        throw new Error(`API Error ${response.status}`);
       }
 
       const result = await response.json();
@@ -67,10 +69,13 @@ const pollTaskStatus = async (taskId: string): Promise<string> => {
       return await handleTaskData(taskData);
 
     } catch (e: any) {
-      if (e.message.includes('success_url')) return e.message.split('||')[1]; // Костыль для возврата из handleTaskData
+      // Если мы получили URL через "бросок исключения" из handleTaskData, возвращаем его
+      if (e.message.startsWith('URL_FOUND:')) {
+          return e.message.replace('URL_FOUND:', '');
+      }
       
-      console.error("Polling attempt failed:", e.message);
-      // Если это не фатальная ошибка, продолжаем
+      console.warn("Polling error:", e.message);
+      // Если это не фатальная ошибка, продолжаем до 20 попыток
       if (attempts > 20) throw e;
     }
 
@@ -78,18 +83,20 @@ const pollTaskStatus = async (taskId: string): Promise<string> => {
     attempts++;
   }
 
-  throw new Error("Превышено время ожидания (5 минут).");
+  throw new Error("Превышено время ожидания генерации (300 сек).");
 };
 
 /**
- * Вспомогательная функция для обработки данных задачи
+ * Парсинг данных задачи и поиск URL изображения
  */
 async function handleTaskData(taskData: any): Promise<string> {
-    console.log(`Task state: ${taskData.state}`);
+    const state = taskData.state || taskData.status;
+    console.log(`Task state: ${state}`);
 
-    if (taskData.state === "success") {
+    if (state === "success" || state === "COMPLETED" || state === "succeeded") {
         let resultUrls: string[] = [];
         
+        // Проверка вложенного JSON (resultJson)
         if (taskData.resultJson) {
             try {
                 const parsed = typeof taskData.resultJson === 'string' 
@@ -99,32 +106,34 @@ async function handleTaskData(taskData: any): Promise<string> {
             } catch (e) {}
         }
 
+        // Проверка вложенного объекта result
         if (resultUrls.length === 0 && taskData.result?.resultUrls) {
             resultUrls = taskData.result.resultUrls;
         }
 
-        const url = resultUrls[0] || taskData.imageUrl || taskData.resultUrl;
-        if (url) {
-            // Используем throw как способ выйти из цикла в pollTaskStatus
-            throw new Error(`success_url||${url}`);
+        const finalUrl = resultUrls[0] || taskData.imageUrl || taskData.resultUrl || (taskData.result && typeof taskData.result === 'string' ? taskData.result : null);
+        
+        if (finalUrl && typeof finalUrl === 'string' && finalUrl.startsWith('http')) {
+            // "Выбрасываем" URL, чтобы выйти из цикла опроса
+            throw new Error(`URL_FOUND:${finalUrl}`);
         }
     }
 
-    if (taskData.state === "failed" || taskData.state === "fail") {
-        throw new Error(taskData.failMsg || taskData.msg || "Task failed");
+    if (state === "failed" || state === "fail" || state === "ERROR") {
+        throw new Error(taskData.failMsg || taskData.msg || "Generation failed on server.");
     }
     
-    return ""; // Еще выполняется
+    return ""; // Еще выполняется (pending/running)
 }
 
 /**
- * Генерирует изображение через createTask
+ * Создание задачи генерации
  */
 export const generateGeminiImage = async (prompt: string, faceUrl: string): Promise<string> => {
   const apiKey = getApiKey();
   
   if (!apiKey) {
-    throw new Error("API KEY не найден.");
+    throw new Error("API KEY (Kie.ai) не найден в настройках.");
   }
 
   try {
@@ -138,6 +147,8 @@ export const generateGeminiImage = async (prompt: string, faceUrl: string): Prom
       }
     };
 
+    console.log("Sending createTask request...");
+    
     const createResponse = await fetch(CREATE_TASK_URL, {
       method: "POST",
       headers: {
@@ -147,18 +158,23 @@ export const generateGeminiImage = async (prompt: string, faceUrl: string): Prom
       body: JSON.stringify(payload),
     });
 
+    if (!createResponse.ok) {
+      const errorText = await createResponse.text();
+      throw new Error(`Create failed (${createResponse.status}): ${errorText}`);
+    }
+
     const createResult = await createResponse.json();
-    const taskId = createResult.data?.taskId || createResult.taskId || createResult.data?.id;
+    const taskId = createResult.data?.taskId || createResult.taskId || createResult.data?.id || createResult.id;
     
     if (!taskId) {
-      throw new Error(createResult.msg || "Failed to get taskId");
+      throw new Error("API did not return taskId. Check your balance/key.");
     }
 
     return await pollTaskStatus(taskId);
 
   } catch (error: any) {
-    if (error.message.startsWith('success_url||')) {
-        return error.message.split('||')[1];
+    if (error.message.startsWith('URL_FOUND:')) {
+        return error.message.replace('URL_FOUND:', '');
     }
     throw error;
   }
