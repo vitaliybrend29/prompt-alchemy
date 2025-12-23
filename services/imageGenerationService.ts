@@ -18,9 +18,11 @@ const getApiKey = () => {
  */
 export const pollTaskStatus = async (taskId: string): Promise<string> => {
   const apiKey = getApiKey();
-  const maxAttempts = 100;
+  const maxAttempts = 60; // 5 минут (60 * 5 сек)
   let attempts = 0;
   const statusUrl = `${KIE_API_JOBS_BASE}/${taskId}`;
+
+  console.log(`Starting polling for task: ${taskId}`);
 
   while (attempts < maxAttempts) {
     try {
@@ -32,45 +34,68 @@ export const pollTaskStatus = async (taskId: string): Promise<string> => {
       });
 
       if (!response.ok) {
-        if (response.status === 404) {
-          attempts++;
-          await new Promise(resolve => setTimeout(resolve, 5000));
-          continue;
-        }
-        throw new Error(`API Error ${response.status}`);
+        console.warn(`Polling response not OK: ${response.status}`);
+        attempts++;
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        continue;
       }
 
-      const result = await response.json();
-      const taskData = result.data || result;
+      const rawResult = await response.json();
+      // Лог для отладки в консоли браузера
+      console.log("Poll Response:", rawResult);
+
+      // В API Kie.ai данные обычно лежат в корне или в поле .data
+      const result = rawResult.data || rawResult;
+      const state = (result.state || result.status || "").toLowerCase();
       
-      const state = taskData.state || taskData.status;
-      if (state === "success" || state === "COMPLETED" || state === "succeeded") {
-          let resultUrls: string[] = [];
-          if (taskData.resultJson) {
+      if (state === "success" || state === "completed" || state === "succeeded") {
+          let foundUrl = "";
+
+          // 1. Проверяем поле resultJson (часто приходит как строка JSON)
+          if (result.resultJson) {
               try {
-                  const parsed = typeof taskData.resultJson === 'string' ? JSON.parse(taskData.resultJson) : taskData.resultJson;
-                  if (parsed.resultUrls) resultUrls = parsed.resultUrls;
-              } catch (e) {}
+                  const parsed = typeof result.resultJson === 'string' ? JSON.parse(result.resultJson) : result.resultJson;
+                  if (parsed.resultUrls && parsed.resultUrls[0]) foundUrl = parsed.resultUrls[0];
+              } catch (e) {
+                  console.error("Failed to parse resultJson", e);
+              }
           }
-          if (resultUrls.length === 0 && taskData.result?.resultUrls) {
-              resultUrls = taskData.result.resultUrls;
+
+          // 2. Проверяем вложенные результаты
+          if (!foundUrl && result.result?.resultUrls?.[0]) {
+              foundUrl = result.result.resultUrls[0];
           }
-          const finalUrl = resultUrls[0] || taskData.imageUrl || taskData.resultUrl;
-          if (finalUrl) return finalUrl;
+
+          // 3. Проверяем прямые ссылки
+          if (!foundUrl) {
+              foundUrl = result.imageUrl || result.resultUrl || result.url;
+          }
+
+          if (foundUrl) {
+              console.log("Image found:", foundUrl);
+              return foundUrl;
+          } else {
+              console.warn("Task success but no URL found in:", result);
+          }
       }
 
-      if (state === "failed" || state === "fail" || state === "ERROR") {
-          throw new Error(taskData.failMsg || taskData.msg || "Generation failed");
+      // Если задача провалилась
+      if (state === "failed" || state === "error" || state === "fail") {
+          throw new Error(result.failMsg || result.msg || "Generation failed on server");
       }
+
+      // Если все еще в очереди или в процессе - ждем
+      console.log(`Task ${taskId} is ${state}... Waiting.`);
 
     } catch (e: any) {
-      console.warn("Polling error:", e.message);
+      console.error("Polling attempt error:", e.message);
+      if (e.message.includes("failed on server")) throw e;
     }
 
     await new Promise(resolve => setTimeout(resolve, 5000));
     attempts++;
   }
-  throw new Error("Timeout");
+  throw new Error("Время ожидания генерации истекло (Timeout)");
 };
 
 /**
@@ -90,12 +115,10 @@ export const createTask = async (prompt: string, faceUrl: string, callbackUrl?: 
     }
   };
 
-  // Дублируем ключ в разных регистрах для надежности
   if (callbackUrl && callbackUrl.trim().startsWith('http')) {
     const url = callbackUrl.trim();
     payload.callBackUrl = url;
-    payload.callback_url = url; // Альтернативный вариант для некоторых версий API
-    payload.callbackUrl = url;  // Еще один вариант
+    payload.callback_url = url;
   }
 
   const createResponse = await fetch(CREATE_TASK_URL, {
@@ -111,8 +134,7 @@ export const createTask = async (prompt: string, faceUrl: string, callbackUrl?: 
   const taskId = createResult.data?.taskId || createResult.taskId || createResult.data?.id;
   
   if (!taskId) {
-    console.error("Full API Response:", createResult);
-    throw new Error(createResult.msg || "No taskId returned");
+    throw new Error(createResult.msg || "API не вернул ID задачи");
   }
   return taskId;
 };

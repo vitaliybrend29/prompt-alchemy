@@ -49,6 +49,7 @@ const App: React.FC = () => {
       try {
         const parsedHistory: PromptGroup[] = JSON.parse(saved);
         setHistory(parsedHistory);
+        // Восстанавливаем опрос для всех активных задач
         parsedHistory.forEach((group, gIdx) => {
           group.prompts.forEach((prompt, pIdx) => {
             if (prompt.taskId && !prompt.generatedImageUrl && !prompt.error) {
@@ -114,13 +115,14 @@ const App: React.FC = () => {
   }, [callbackUrl]);
 
   const resumePolling = async (groupIdx: number, promptIdx: number, taskId: string) => {
+    // Убеждаемся, что UI показывает процесс
     setHistory(prev => {
       const next = [...prev];
       if (next[groupIdx]?.prompts[promptIdx]) {
         next[groupIdx].prompts[promptIdx] = { 
           ...next[groupIdx].prompts[promptIdx], 
           isGenerating: true,
-          taskId: taskId 
+          error: undefined
         };
       }
       return next;
@@ -140,6 +142,7 @@ const App: React.FC = () => {
         return next;
       });
     } catch (err: any) {
+      console.error("Polling failed:", err);
       setHistory(prev => {
         const next = [...prev];
         if (next[groupIdx]?.prompts[promptIdx]) {
@@ -216,33 +219,48 @@ const App: React.FC = () => {
     const group = history[groupIndex];
     const promptObj = group.prompts[promptIndex];
     
-    setHistory(prev => {
-      const next = [...prev];
-      next[groupIndex].prompts[promptIndex] = { ...next[groupIndex].prompts[promptIndex], isGenerating: true, error: undefined };
-      return next;
-    });
+    // Если задача уже идет - просто перезапускаем опрос
+    if (promptObj.isGenerating && promptObj.taskId) {
+        resumePolling(groupIndex, promptIndex, promptObj.taskId);
+        return;
+    }
 
     try {
       const faceRef = group.subjectReferences[0];
       const taskId = await createTask(promptObj.text, faceRef, callbackUrl);
       
+      // Сразу сохраняем taskId
       setHistory(prev => {
         const next = [...prev];
-        next[groupIndex].prompts[promptIndex] = { ...next[groupIndex].prompts[promptIndex], taskId: taskId };
+        next[groupIndex].prompts[promptIndex] = { 
+          ...next[groupIndex].prompts[promptIndex], 
+          taskId: taskId, 
+          isGenerating: true, 
+          error: undefined 
+        };
         return next;
       });
 
+      // Запускаем опрос
       const imageUrl = await pollTaskStatus(taskId);
       
       setHistory(prev => {
         const next = [...prev];
-        next[groupIndex].prompts[promptIndex] = { ...next[groupIndex].prompts[promptIndex], isGenerating: false, generatedImageUrl: imageUrl };
+        next[groupIndex].prompts[promptIndex] = { 
+          ...next[groupIndex].prompts[promptIndex], 
+          isGenerating: false, 
+          generatedImageUrl: imageUrl 
+        };
         return next;
       });
     } catch (err: any) {
       setHistory(prev => {
         const next = [...prev];
-        next[groupIndex].prompts[promptIndex] = { ...next[groupIndex].prompts[promptIndex], isGenerating: false, error: err.message };
+        next[groupIndex].prompts[promptIndex] = { 
+          ...next[groupIndex].prompts[promptIndex], 
+          isGenerating: false, 
+          error: err.message 
+        };
         return next;
       });
     }
@@ -280,18 +298,8 @@ const App: React.FC = () => {
                   <h3 className="text-sm font-bold text-white flex items-center gap-2"><GridIcon className="w-4 h-4 text-sky-400" /> Webhook Test</h3>
                   <p className="text-[11px] text-slate-400">Current URL: {callbackUrl}</p>
                   <div className="flex gap-2">
-                    <button 
-                      onClick={testWebhook}
-                      className="flex-grow py-2 bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold rounded-lg transition-colors"
-                    >
-                      Send Test Callback
-                    </button>
-                    <button 
-                      onClick={() => setCallbackUrl(defaultCallback)}
-                      className="px-3 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-600 text-slate-300 text-xs"
-                    >
-                      Reset
-                    </button>
+                    <button onClick={testWebhook} className="flex-grow py-2 bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold rounded-lg transition-colors">Send Test Callback</button>
+                    <button onClick={() => setCallbackUrl(defaultCallback)} className="px-3 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-600 text-slate-300 text-xs">Reset</button>
                   </div>
                 </div>
               </div>
@@ -342,11 +350,16 @@ const App: React.FC = () => {
                         <div className="flex justify-between mb-2">
                           <span className="text-[9px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded font-bold">V{pIdx + 1}</span>
                           <div className="flex gap-2">
-                            <button onClick={() => handleGenImage(groupIdx, pIdx)} disabled={prompt.isGenerating} className="text-[10px] font-bold bg-indigo-600 px-3 py-1 rounded-lg hover:bg-indigo-500 flex items-center gap-2">
+                            <button 
+                                onClick={() => handleGenImage(groupIdx, pIdx)} 
+                                className={`text-[10px] font-bold px-3 py-1 rounded-lg flex items-center gap-2 transition-all ${
+                                    prompt.isGenerating ? 'bg-slate-700 text-slate-400' : 'bg-indigo-600 text-white hover:bg-indigo-500'
+                                }`}
+                            >
                               {prompt.isGenerating ? (
                                 <>
-                                  <span className="w-2 h-2 bg-white rounded-full animate-ping"></span>
-                                  Generating...
+                                  <span className="w-2 h-2 bg-indigo-400 rounded-full animate-pulse"></span>
+                                  Checking...
                                 </>
                               ) : "Gen Image"}
                             </button>
@@ -354,13 +367,19 @@ const App: React.FC = () => {
                           </div>
                         </div>
                         <p className="text-sm text-slate-300 leading-relaxed font-mono">{prompt.text}</p>
-                        {prompt.error && <p className="text-[10px] text-red-400 mt-2 font-bold">{prompt.error}</p>}
+                        {prompt.error && <p className="text-[10px] text-red-400 mt-2 font-bold">Error: {prompt.error}</p>}
+                        {prompt.taskId && !prompt.generatedImageUrl && !prompt.isGenerating && (
+                            <p className="text-[9px] text-slate-500 mt-2 italic">Task ID: {prompt.taskId.slice(0,8)}...</p>
+                        )}
                       </div>
                     </div>
                     {prompt.generatedImageUrl && (
-                      <div className="ml-0 sm:ml-28 rounded-2xl overflow-hidden border border-slate-700 max-w-sm aspect-square bg-slate-900 relative">
+                      <div className="ml-0 sm:ml-28 rounded-2xl overflow-hidden border border-slate-700 max-w-sm aspect-square bg-slate-900 relative shadow-2xl group/img">
                         <img src={prompt.generatedImageUrl} className="w-full h-full object-cover" />
-                        <div className="absolute top-2 right-2 p-1 bg-black/50 backdrop-blur-md rounded text-white text-[9px] font-bold">Generated</div>
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center">
+                            <a href={prompt.generatedImageUrl} target="_blank" rel="noreferrer" className="bg-white text-black px-4 py-2 rounded-full text-xs font-bold">View Full Size</a>
+                        </div>
+                        <div className="absolute top-2 right-2 p-1 bg-indigo-600/80 backdrop-blur-md rounded text-white text-[9px] font-bold px-2">Final Alchemy</div>
                       </div>
                     )}
                   </div>
@@ -368,6 +387,12 @@ const App: React.FC = () => {
               </div>
             </div>
           ))}
+          {history.length === 0 && (
+              <div className="h-64 border-2 border-dashed border-slate-800 rounded-3xl flex flex-col items-center justify-center text-slate-600">
+                  <WandIcon className="w-12 h-12 mb-4 opacity-20" />
+                  <p className="text-sm font-medium">Your alchemy history is empty</p>
+              </div>
+          )}
         </div>
       </main>
     </div>
