@@ -3,7 +3,11 @@ import React, { useState, useEffect } from 'react';
 import ImageUploader from './components/ImageUploader';
 import { UploadedImage, LoadingState, GenerationMode, PromptGroup, GeneratedPrompt } from './types';
 import { generatePrompts } from './services/geminiService';
-import { WandIcon, CopyIcon, SparklesIcon, ImageIcon, UserIcon, TrashIcon, TelegramIcon } from './components/Icons';
+import { generateGeminiImage } from './services/imageGenerationService';
+import { WandIcon, CopyIcon, SparklesIcon, ImageIcon, UserIcon, TrashIcon, TelegramIcon, SettingsIcon, PlayIcon, GridIcon } from './components/Icons';
+
+// Note: Removed local AIStudio interface declaration to resolve duplicate identifier and modifier mismatch errors
+// as these are already provided by the environment.
 
 const MAX_IMAGES_PER_CATEGORY = 5;
 const MAX_HISTORY_ITEMS = 10;
@@ -33,14 +37,30 @@ const App: React.FC = () => {
   const [history, setHistory] = useState<PromptGroup[]>([]);
   const [loadingState, setLoadingState] = useState<LoadingState>(LoadingState.IDLE);
   const [error, setError] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => {
-    const saved = localStorage.getItem('prompt_alchemy_v4');
+    const checkApiKey = async () => {
+      // @ts-ignore - window.aistudio is globally available but might not be in the local environment's Window type
+      if (window.aistudio) {
+        // @ts-ignore
+        const hasKey = await window.aistudio.hasSelectedApiKey();
+        if (!hasKey) {
+          // @ts-ignore
+          await window.aistudio.openSelectKey();
+        }
+      }
+    };
+    checkApiKey();
+  }, []);
+
+  useEffect(() => {
+    const saved = localStorage.getItem('prompt_alchemy_v5');
     if (saved) {
       try {
         setHistory(JSON.parse(saved));
       } catch (e) {
-        localStorage.removeItem('prompt_alchemy_v4');
+        localStorage.removeItem('prompt_alchemy_v5');
       }
     }
   }, []);
@@ -48,7 +68,7 @@ const App: React.FC = () => {
   useEffect(() => {
     try {
       const historyToSave = history.slice(0, MAX_HISTORY_ITEMS);
-      localStorage.setItem('prompt_alchemy_v4', JSON.stringify(historyToSave));
+      localStorage.setItem('prompt_alchemy_v5', JSON.stringify(historyToSave));
     } catch (e) {}
   }, [history]);
 
@@ -64,11 +84,11 @@ const App: React.FC = () => {
       setError("Add at least one style reference image.");
       return;
     }
-    if (genMode === GenerationMode.RANDOM_CREATIVE && !hasSubject) {
-      setError("Add a subject photo for random creative mode.");
+    if ((genMode === GenerationMode.RANDOM_CREATIVE || genMode === GenerationMode.CHARACTER_SHEET) && !hasSubject) {
+      setError("Add a subject photo for this mode.");
       return;
     }
-    
+
     setError(null);
     setLoadingState(LoadingState.ANALYZING);
 
@@ -86,16 +106,52 @@ const App: React.FC = () => {
         id: Date.now().toString(),
         timestamp: Date.now(),
         prompts: promptsWithThumbnails,
-        styleReferences: [],
-        subjectReferences: [],
-        mode: genMode
+        styleReferences: styleImages.map(i => i.base64),
+        subjectReferences: subjectImages.map(i => i.base64),
+        mode: genMode,
       };
 
       setHistory(prev => [newGroup, ...prev].slice(0, MAX_HISTORY_ITEMS));
       setLoadingState(LoadingState.IDLE);
     } catch (err: any) {
+      if (err.message?.includes("Requested entity was not found")) {
+        // @ts-ignore
+        if (window.aistudio) await window.aistudio.openSelectKey();
+      }
       setError(err.message || "Something went wrong.");
       setLoadingState(LoadingState.ERROR);
+    }
+  };
+
+  const handleGenImage = async (groupIndex: number, promptIndex: number) => {
+    const group = history[groupIndex];
+    const promptObj = group.prompts[promptIndex];
+    
+    setHistory(prev => {
+      const next = [...prev];
+      next[groupIndex].prompts[promptIndex] = { ...next[groupIndex].prompts[promptIndex], isGenerating: true, error: undefined };
+      return next;
+    });
+
+    try {
+      const faceRef = group.subjectReferences[0];
+      const imageUrl = await generateGeminiImage(promptObj.text, faceRef);
+      
+      setHistory(prev => {
+        const next = [...prev];
+        next[groupIndex].prompts[promptIndex] = { ...next[groupIndex].prompts[promptIndex], isGenerating: false, generatedImageUrl: imageUrl };
+        return next;
+      });
+    } catch (err: any) {
+      if (err.message?.includes("Requested entity was not found")) {
+        // @ts-ignore
+        if (window.aistudio) await window.aistudio.openSelectKey();
+      }
+      setHistory(prev => {
+        const next = [...prev];
+        next[groupIndex].prompts[promptIndex] = { ...next[groupIndex].prompts[promptIndex], isGenerating: false, error: err.message };
+        return next;
+      });
     }
   };
 
@@ -111,27 +167,57 @@ const App: React.FC = () => {
             <div className="p-2 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg shadow-lg">
               <SparklesIcon className="w-5 h-5 text-white" />
             </div>
-            <h1 className="text-xl font-bold text-white tracking-tight">Prompt Alchemy</h1>
+            <h1 className="text-xl font-bold text-white tracking-tight hidden lg:block">Prompt Alchemy</h1>
           </div>
+
           <div className="flex items-center gap-4">
+            <button 
+              onClick={() => setShowSettings(!showSettings)}
+              className={`p-2 rounded-full transition-colors ${showSettings ? 'bg-indigo-500/20 text-indigo-400' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+              title="API Key Settings"
+            >
+              <SettingsIcon className="w-5 h-5" />
+            </button>
             <a 
               href="https://t.me/promtalchhemy1_bot" 
               target="_blank" 
               rel="noopener noreferrer"
-              className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-full border border-slate-700 text-xs text-indigo-400 font-medium transition-colors"
+              className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-full border border-slate-700 text-xs text-indigo-400 font-medium transition-colors"
             >
-              <TelegramIcon className="w-3.5 h-3.5" /> Telegram Bot
+              <TelegramIcon className="w-3.5 h-3.5" /> Bot
             </a>
             {history.length > 0 && (
               <button 
                 onClick={() => { if(confirm('Clear history?')) setHistory([]); }} 
                 className="text-xs text-slate-500 hover:text-red-400 flex items-center gap-1 transition-colors"
               >
-                <TrashIcon className="w-3 h-3" /> Clear History
+                <TrashIcon className="w-3 h-3" /> Clear
               </button>
             )}
           </div>
         </div>
+
+        {showSettings && (
+          <div className="max-w-6xl mx-auto px-4 mt-4 animate-in slide-in-from-top duration-300">
+            <div className="bg-surface border border-slate-700 rounded-2xl p-5 shadow-2xl">
+              <h3 className="text-sm font-bold text-white mb-2 flex items-center gap-2">
+                <SettingsIcon className="w-4 h-4 text-indigo-400" />
+                Gemini API Key
+              </h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                App uses the system-provided API key for all AI operations including prompt analysis and image generation. 
+                If you encounter "Entity not found", please click the button below to re-select your key.
+              </p>
+              <button 
+                // @ts-ignore
+                onClick={() => window.aistudio.openSelectKey()}
+                className="mt-4 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg transition-colors"
+              >
+                Change API Key
+              </button>
+            </div>
+          </div>
+        )}
       </header>
 
       <main className="max-w-6xl mx-auto px-4 grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -176,11 +262,20 @@ const App: React.FC = () => {
               )}
 
               <div className="space-y-4 pt-4 border-t border-slate-700/50">
-                <div className="grid grid-cols-1 gap-2 bg-slate-900/50 p-1 rounded-xl border border-slate-700">
-                  <div className="flex gap-1">
-                    <button onClick={() => setGenMode(GenerationMode.MATCH_STYLE)} className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg transition-all ${genMode === GenerationMode.MATCH_STYLE ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500'}`}>Match Style</button>
-                    <button onClick={() => setGenMode(GenerationMode.CUSTOM_SCENE)} className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg transition-all ${genMode === GenerationMode.CUSTOM_SCENE ? 'bg-pink-600 text-white shadow-sm' : 'text-slate-500'}`}>Custom Scene</button>
-                    <button onClick={() => setGenMode(GenerationMode.RANDOM_CREATIVE)} className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg transition-all ${genMode === GenerationMode.RANDOM_CREATIVE ? 'bg-purple-600 text-white shadow-sm' : 'text-slate-500'}`}>Random</button>
+                <div className="grid grid-cols-1 gap-2 bg-slate-900/50 p-1 rounded-xl border border-slate-700 overflow-hidden">
+                  <div className="grid grid-cols-2 gap-1 p-1">
+                    <button onClick={() => setGenMode(GenerationMode.MATCH_STYLE)} className={`py-1.5 text-[10px] font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 ${genMode === GenerationMode.MATCH_STYLE ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:bg-slate-800'}`}>
+                      <ImageIcon className="w-3 h-3" /> Style
+                    </button>
+                    <button onClick={() => setGenMode(GenerationMode.CUSTOM_SCENE)} className={`py-1.5 text-[10px] font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 ${genMode === GenerationMode.CUSTOM_SCENE ? 'bg-pink-600 text-white' : 'text-slate-500 hover:bg-slate-800'}`}>
+                      <SparklesIcon className="w-3 h-3" /> Scene
+                    </button>
+                    <button onClick={() => setGenMode(GenerationMode.CHARACTER_SHEET)} className={`py-1.5 text-[10px] font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 ${genMode === GenerationMode.CHARACTER_SHEET ? 'bg-emerald-600 text-white' : 'text-slate-500 hover:bg-slate-800'}`}>
+                      <GridIcon className="w-3 h-3" /> Multi-Angle
+                    </button>
+                    <button onClick={() => setGenMode(GenerationMode.RANDOM_CREATIVE)} className={`py-1.5 text-[10px] font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 ${genMode === GenerationMode.RANDOM_CREATIVE ? 'bg-purple-600 text-white' : 'text-slate-500 hover:bg-slate-800'}`}>
+                      <WandIcon className="w-3 h-3" /> Random
+                    </button>
                   </div>
                 </div>
 
@@ -196,7 +291,7 @@ const App: React.FC = () => {
                 <button
                   onClick={handleGenerate}
                   disabled={loadingState === LoadingState.ANALYZING}
-                  className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-2 disabled:opacity-50 transition-all"
+                  className="w-full py-3 px-4 rounded-xl text-white font-bold shadow-lg flex items-center justify-center gap-2 disabled:opacity-50 transition-all bg-gradient-to-r from-indigo-600 to-purple-600 hover:shadow-indigo-500/20"
                 >
                   {loadingState === LoadingState.ANALYZING ? (
                     <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
@@ -204,7 +299,7 @@ const App: React.FC = () => {
                     <><WandIcon className="w-4 h-4" /> Start Alchemy</>
                   )}
                 </button>
-                {error && <p className="text-[10px] text-red-400 text-center">{error}</p>}
+                {error && <p className="text-[10px] text-red-400 text-center font-bold bg-red-400/10 py-2 rounded-lg">{error}</p>}
               </div>
             </div>
           </div>
@@ -213,18 +308,22 @@ const App: React.FC = () => {
         {/* OUTPUT AREA */}
         <div className="lg:col-span-8 space-y-6">
           {history.length === 0 && loadingState === LoadingState.IDLE && (
-            <div className="flex flex-col items-center justify-center h-96 border-2 border-dashed border-slate-800 rounded-3xl text-slate-600">
-              <SparklesIcon className="w-12 h-12 mb-4 opacity-20" />
-              <p className="text-sm">Add target images and pick a mode to start.</p>
+            <div className="flex flex-col items-center justify-center h-[500px] border-2 border-dashed border-slate-800 rounded-3xl text-slate-600 bg-slate-900/10">
+              <SparklesIcon className="w-12 h-12 mb-4 opacity-10" />
+              <p className="text-sm font-medium">Synthesizer is idle. Upload references to begin.</p>
             </div>
           )}
 
-          {history.map((group) => (
-            <div key={group.id} className="bg-surface/50 rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
+          {history.map((group, groupIdx) => (
+            <div key={group.id} className="bg-surface/50 rounded-2xl border border-slate-800 overflow-hidden shadow-xl animate-in fade-in slide-in-from-bottom-4 duration-500">
               <div className="bg-slate-800/50 px-5 py-3 border-b border-slate-700/50 flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="p-1.5 rounded-lg bg-slate-700/50">
-                    {group.mode === GenerationMode.CUSTOM_SCENE ? <SparklesIcon className="w-4 h-4 text-pink-400" /> : <ImageIcon className="w-4 h-4 text-indigo-400" />}
+                  <div className={`p-1.5 rounded-lg ${
+                    group.mode === GenerationMode.CHARACTER_SHEET ? 'bg-emerald-600/20 text-emerald-400' :
+                    group.mode === GenerationMode.CUSTOM_SCENE ? 'bg-pink-600/20 text-pink-400' :
+                    'bg-indigo-600/20 text-indigo-400'
+                  }`}>
+                    {group.mode === GenerationMode.CHARACTER_SHEET ? <GridIcon className="w-4 h-4" /> : <SparklesIcon className="w-4 h-4" />}
                   </div>
                   <div className="text-[10px] uppercase font-bold tracking-widest text-slate-400">
                     {new Date(group.timestamp).toLocaleTimeString()} • {group.mode.replace('_', ' ')}
@@ -232,24 +331,53 @@ const App: React.FC = () => {
                 </div>
               </div>
 
-              <div className="p-5 space-y-6">
-                {group.prompts.map((prompt, idx) => (
-                  <div key={idx} className="flex gap-4 group">
-                    {prompt.referenceImage && (
-                      <div className="flex-shrink-0 w-20 h-20 rounded-lg overflow-hidden border border-slate-700 shadow-md">
-                        <img src={prompt.referenceImage} alt="Ref" className="w-full h-full object-cover" />
+              <div className="p-5 space-y-8">
+                {group.prompts.map((prompt, pIdx) => (
+                  <div key={pIdx} className="space-y-4">
+                    <div className="flex flex-col sm:flex-row gap-4 group">
+                      {prompt.referenceImage && (
+                        <div className="flex-shrink-0 w-24 h-24 rounded-xl overflow-hidden border border-slate-700 shadow-md">
+                          <img src={prompt.referenceImage} alt="Ref" className="w-full h-full object-cover" />
+                        </div>
+                      )}
+                      
+                      <div className="flex-grow bg-slate-900/40 rounded-xl p-4 border border-slate-700/30 group-hover:border-indigo-500/30 transition-all relative">
+                        <div className="flex justify-between items-start gap-3 mb-2">
+                          <span className="text-[9px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded font-bold uppercase tracking-wider">Variation {pIdx + 1}</span>
+                          <div className="flex gap-2">
+                             <button 
+                              onClick={() => handleGenImage(groupIdx, pIdx)}
+                              disabled={prompt.isGenerating}
+                              className={`flex items-center gap-1.5 text-[10px] font-bold px-3 py-1 rounded-lg transition-all opacity-0 group-hover:opacity-100 ${
+                                prompt.isGenerating 
+                                ? 'bg-indigo-500/20 text-indigo-400' 
+                                : 'bg-indigo-600 text-white hover:bg-indigo-500 shadow-lg shadow-indigo-600/20'
+                              }`}
+                            >
+                              {prompt.isGenerating ? (
+                                <><span className="w-2.5 h-2.5 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin"></span> Generating...</>
+                              ) : (
+                                <><PlayIcon className="w-3 h-3" /> Gen Image</>
+                              )}
+                            </button>
+                            <button onClick={() => copyToClipboard(prompt.text)} className="text-slate-500 hover:text-white p-1.5 bg-slate-800 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity">
+                              <CopyIcon className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                        <p className="text-sm text-slate-300 leading-relaxed font-mono selection:bg-indigo-500/40">{prompt.text}</p>
+                        {prompt.error && <p className="text-[10px] text-red-400 mt-2 font-bold">Error: {prompt.error}</p>}
+                      </div>
+                    </div>
+
+                    {prompt.generatedImageUrl && (
+                      <div className="ml-0 sm:ml-28 rounded-2xl overflow-hidden border border-slate-700 bg-slate-900 shadow-2xl max-w-sm aspect-square relative group/res animate-in zoom-in fade-in duration-500">
+                        <img src={prompt.generatedImageUrl} alt="Generated" className="w-full h-full object-cover" />
+                        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover/res:opacity-100 transition-opacity flex items-center justify-center gap-3">
+                          <a href={prompt.generatedImageUrl} download className="px-4 py-2 bg-indigo-600 text-white rounded-full text-xs font-bold hover:bg-indigo-500 transition-all">Download</a>
+                        </div>
                       </div>
                     )}
-                    
-                    <div className="flex-grow bg-slate-900/40 rounded-xl p-4 border border-slate-700/30 group-hover:border-indigo-500/30 transition-all relative">
-                      <div className="flex justify-between items-start gap-3 mb-2">
-                        <span className="text-[9px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded font-bold uppercase">Prompt {idx + 1}</span>
-                        <button onClick={() => copyToClipboard(prompt.text)} className="text-slate-500 hover:text-white p-1 bg-slate-800 rounded opacity-0 group-hover:opacity-100 transition-opacity">
-                          <CopyIcon className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                      <p className="text-sm text-slate-300 leading-relaxed font-mono selection:bg-indigo-500/40">{prompt.text}</p>
-                    </div>
                   </div>
                 ))}
               </div>

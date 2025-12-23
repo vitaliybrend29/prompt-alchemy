@@ -11,19 +11,23 @@ export enum GenerationMode {
   MATCH_STYLE = 'MATCH_STYLE',
   RANDOM_CREATIVE = 'RANDOM_CREATIVE',
   CUSTOM_SCENE = 'CUSTOM_SCENE',
+  CHARACTER_SHEET = 'CHARACTER_SHEET',
 }
 
 export interface GeneratedPrompt {
   text: string;
-  referenceImage?: string; // base64 data of the specific reference used for this prompt
+  referenceImage?: string;
+  isGenerating?: boolean;
+  generatedImageUrl?: string;
+  error?: string;
 }
 
 export interface PromptGroup {
   id: string;
   timestamp: number;
   prompts: GeneratedPrompt[];
-  styleReferences: string[]; // original style images
-  subjectReferences: string[]; // original subject images
+  styleReferences: string[];
+  subjectReferences: string[];
   mode: GenerationMode;
 }
 
