@@ -21,68 +21,51 @@ export const generatePrompts = async (
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   let systemInstruction = `You are a world-class Midjourney Prompt Engineer.
-  TASK: Generate detailed, professional visual prompts in English.
+  TASK: Generate detailed, professional visual prompts.
   
-  CORE IDENTITY PRESERVATION:
-  - Analyze the SUBJECT's facial features (structure, eyes, nose, lips) and hair.
-  - In EVERY prompt, describe the subject's features clearly so the character remains consistent.
+  IDENTITY PRESERVATION:
+  - Subject images provided are of the SAME person. Analyze all to capture their essence.
+  - Describe the person's features (face, hair, build) directly in the prompt to ensure consistency.
   
-  CLOTHING & FIGURE RULES (STRICT):
-  - Always specify clothing that emphasizes a fit and toned physique.
-  - Recommended attire: "form-fitting sports bra and tight athletic shorts", "minimalist bodysuit", or "elegant lingerie that highlights the silhouette".
-  - Use materials like "spandex", "silk", or "technical fabric" to add realism.
+  STYLE MAPPING:
+  - If multiple Style References are provided: Generate ${count} unique prompts for EACH style image.
+  - Return the 'imageIndex' corresponding to the specific style image used.
   
-  MODE SPECIFIC RULES:
-  - If mode is CHARACTER_SHEET: You must generate ${count} INDIVIDUAL prompts, each for a different specific angle. 
-    Prompt 1: Full body shot, front view, straight posture.
-    Prompt 2: Full body shot, back view, showing the back and legs.
-    Prompt 3: Side profile shot, showing the silhouette.
-    Prompt 4: Close-up portrait or dynamic 3/4 view.
-    Each prompt must be a standalone masterpiece, not a combined sheet.
+  CLOTHING:
+  - Specify form-fitting, athletic, or high-fashion clothing that emphasizes a fit silhouette.
   
   Output MUST be valid JSON.`;
 
   const parts: any[] = [];
   
+  // Добавляем фото модели
   if (subjectImages.length > 0) {
-    parts.push({ text: `SUBJECT REFERENCE PHOTOS (The person to maintain in all prompts):` });
+    parts.push({ text: `SUBJECT/IDENTITY PHOTOS (Use these for person's appearance):` });
     subjectImages.forEach(img => parts.push({ inlineData: { mimeType: img.mimeType, data: cleanBase64(img.base64) } }));
   }
 
-  if (mode === GenerationMode.CHARACTER_SHEET) {
-    parts.push({ text: `
-      ACTION: Generate ${count} SEPARATE prompts for a character reference set.
-      CLOTHING: The subject must wear form-fitting attire (sports top and shorts or lingerie) that emphasizes the figure.
-      ANGLES TO COVER: Provide a sequence of different angles (front, back, side, etc.).
-      Return JSON: { "results": [ { "imageIndex": 0, "prompts": ["prompt 1 (front view)", "prompt 2 (back view)", ...] } ] }
-    ` });
-  }
-  else if (mode === GenerationMode.CUSTOM_SCENE && customText) {
-    parts.push({ text: `
-      SCENE CONTEXT: "${customText}".
-      Generate ${count} prompts placing this specific person in this scene. 
-      Ensure clothing highlights their figure appropriately for the scene.
-      Return JSON: { "results": [ { "imageIndex": 0, "prompts": ["...", "..."] } ] }
-    ` });
-  }
-  else if (mode === GenerationMode.RANDOM_CREATIVE) {
-    parts.push({ text: `
-      Generate ${count} creative, high-fashion editorial prompts for this person.
-      Experiment with lighting (neon, golden hour, rim lighting) and emphasize their physique.
-      Return JSON: { "results": [ { "imageIndex": 0, "prompts": ["...", "..."] } ] }
-    ` });
-  } 
-  else if (styleImages.length > 0) {
-    parts.push({ text: `STYLE REFERENCES:` });
-    styleImages.forEach(img => parts.push({ inlineData: { mimeType: img.mimeType, data: cleanBase64(img.base64) } }));
+  // Добавляем фото стилей (если есть)
+  if (styleImages.length > 0 && mode === GenerationMode.MATCH_STYLE) {
+    parts.push({ text: `STYLE REFERENCE PHOTOS:` });
+    styleImages.forEach((img, idx) => {
+      parts.push({ text: `Style Image [${idx}]:` });
+      parts.push({ inlineData: { mimeType: img.mimeType, data: cleanBase64(img.base64) } });
+    });
     
     parts.push({ text: `
-      Generate ${count} prompts merging the SUBJECT's identity with the STYLE's aesthetic and environment.
-      Maintain the figure-emphasizing clothing instructions.
-      Return JSON: { "results": [ { "imageIndex": 0, "prompts": ["...", "..."] } ] }
+      ACTION: For EACH Style Image provided above, generate ${count} prompts.
+      Each prompt should place the Subject into the aesthetic, lighting, and environment of that specific Style Image.
+      Return imageIndex for the Style Image used.
     ` });
-  } else {
-    throw new Error("Missing required reference images.");
+  } 
+  else if (mode === GenerationMode.CHARACTER_SHEET) {
+    parts.push({ text: `Generate ${count} prompts for a character sheet (front, side, back views) for the subject.` });
+  }
+  else if (mode === GenerationMode.CUSTOM_SCENE) {
+    parts.push({ text: `Generate ${count} prompts for the subject in this scene: "${customText}".` });
+  }
+  else {
+    parts.push({ text: `Generate ${count} creative high-fashion prompts for the subject.` });
   }
 
   try {
@@ -100,7 +83,7 @@ export const generatePrompts = async (
               items: {
                 type: Type.OBJECT,
                 properties: {
-                  imageIndex: { type: Type.INTEGER },
+                  imageIndex: { type: Type.INTEGER, description: "Index of the reference image used" },
                   prompts: { type: Type.ARRAY, items: { type: Type.STRING } }
                 },
                 required: ["imageIndex", "prompts"]
@@ -116,16 +99,18 @@ export const generatePrompts = async (
     const finalPrompts: { text: string; referenceImage?: string }[] = [];
 
     parsed.results.forEach(res => {
-      const index = res.imageIndex || 0;
-      const refImg = mode === GenerationMode.MATCH_STYLE 
-        ? styleImages[index]?.base64 || styleImages[0]?.base64 
-        : subjectImages[index]?.base64 || subjectImages[0]?.base64;
+      const idx = res.imageIndex || 0;
+      // Если есть стили - берем стиль, если нет - берем фото субъекта
+      const refImg = (mode === GenerationMode.MATCH_STYLE && styleImages.length > 0)
+        ? styleImages[idx]?.base64 || styleImages[0]?.base64 
+        : subjectImages[idx]?.base64 || subjectImages[0]?.base64;
 
       res.prompts.forEach(p => finalPrompts.push({ text: p, referenceImage: refImg }));
     });
 
     return finalPrompts;
   } catch (error: any) {
+    console.error("Gemini Error:", error);
     throw error;
   }
 };

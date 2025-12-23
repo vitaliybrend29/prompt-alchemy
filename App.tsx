@@ -6,14 +6,14 @@ import { generatePrompts } from './services/geminiService';
 import { createTask, pollTaskStatus } from './services/imageGenerationService';
 import { WandIcon, CopyIcon, SparklesIcon, ImageIcon, UserIcon, TrashIcon, GridIcon } from './components/Icons';
 
-const MAX_HISTORY_ITEMS = 20;
+const MAX_HISTORY_ITEMS = 30;
 
 const ASPECT_RATIOS = [
-  { id: '1:1', label: '1:1' },
-  { id: '16:9', label: '16:9' },
-  { id: '9:16', label: '9:16' },
-  { id: '4:3', label: '4:3' },
-  { id: '3:2', label: '3:2' }
+  { id: '1:1', label: '1:1', desc: 'Square' },
+  { id: '16:9', label: '16:9', desc: 'Cinema' },
+  { id: '9:16', label: '9:16', desc: 'Mobile' },
+  { id: '4:3', label: '4:3', desc: 'Photo' },
+  { id: '3:2', label: '3:2', desc: 'Classic' }
 ];
 
 const createThumbnail = (base64: string, maxWidth = 200): Promise<string> => {
@@ -43,11 +43,10 @@ const App: React.FC = () => {
   const [loadingState, setLoadingState] = useState<LoadingState>(LoadingState.IDLE);
   const [error, setError] = useState<string | null>(null);
 
-  // Используем callback из env или пустую строку, так как шестеренку убрали
   const callbackUrl = process.env.KIE_CALLBACK_URL || '';
 
   useEffect(() => {
-    const saved = localStorage.getItem('alchemy_v6_history');
+    const saved = localStorage.getItem('alchemy_v7_history');
     if (saved) {
       try {
         const parsed: PromptGroup[] = JSON.parse(saved);
@@ -60,13 +59,13 @@ const App: React.FC = () => {
           });
         });
       } catch (e) {
-        localStorage.removeItem('alchemy_v6_history');
+        localStorage.removeItem('alchemy_v7_history');
       }
     }
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('alchemy_v6_history', JSON.stringify(history.slice(0, MAX_HISTORY_ITEMS)));
+    localStorage.setItem('alchemy_v7_history', JSON.stringify(history.slice(0, MAX_HISTORY_ITEMS)));
   }, [history]);
 
   const resumePolling = async (groupIdx: number, promptIdx: number, taskId: string) => {
@@ -112,6 +111,23 @@ const App: React.FC = () => {
     }
   };
 
+  const handleDownload = async (url: string, filename: string) => {
+    try {
+      const response = await fetch(url);
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (e) {
+      window.open(url, '_blank');
+    }
+  };
+
   const convertToPublicUrl = async (image: UploadedImage): Promise<string | undefined> => {
     const key = process.env.IMGBB_API_KEY;
     if (!key) return undefined;
@@ -134,8 +150,8 @@ const App: React.FC = () => {
   };
 
   const handleGenerate = async () => {
-    if (subjectImages.length === 0) { setError("Upload at least one model photo."); return; }
-    if (genMode === GenerationMode.MATCH_STYLE && styleImages.length === 0) { setError("Upload a style reference."); return; }
+    if (subjectImages.length === 0) { setError("Upload model photos."); return; }
+    if (genMode === GenerationMode.MATCH_STYLE && styleImages.length === 0) { setError("Upload style references."); return; }
     
     setError(null);
     setLoadingState(LoadingState.ANALYZING);
@@ -170,7 +186,7 @@ const App: React.FC = () => {
 
     try {
       const faceUrls = group.subjectReferences;
-      if (faceUrls.length === 0) throw new Error("Photos are not ready. Wait for upload.");
+      if (faceUrls.length === 0) throw new Error("Upload not finished.");
       
       const taskId = await createTask(prompt.text, faceUrls, aspectRatio, callbackUrl);
       resumePolling(groupIdx, promptIdx, taskId);
@@ -180,201 +196,226 @@ const App: React.FC = () => {
   };
 
   const clearHistory = () => {
-    if (confirm("Reset everything?")) {
+    if (confirm("Reset History?")) {
       setHistory([]);
-      localStorage.removeItem('alchemy_v6_history');
+      localStorage.removeItem('alchemy_v7_history');
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans tracking-tight">
-      <header className="sticky top-0 z-40 bg-slate-950/70 backdrop-blur-xl border-b border-white/5 py-4 px-8">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3 group">
-            <div className="p-2 bg-indigo-600/20 rounded-xl group-hover:scale-110 transition-transform">
-              <SparklesIcon className="w-5 h-5 text-indigo-400" />
+    <div className="min-h-screen bg-[#07090f] text-slate-200 font-sans">
+      <header className="sticky top-0 z-50 bg-[#07090f]/80 backdrop-blur-xl border-b border-white/5 px-8 py-4">
+        <div className="max-w-[1600px] mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-600/20">
+              <SparklesIcon className="w-6 h-6 text-white" />
             </div>
-            <h1 className="text-xl font-black uppercase tracking-widest text-white italic">Alchemy v6</h1>
+            <div>
+              <h1 className="text-lg font-black tracking-tighter text-white uppercase italic">Alchemist Studio</h1>
+              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none">Intelligence v7.0</p>
+            </div>
           </div>
-          <button onClick={clearHistory} className="text-[10px] font-bold text-slate-500 hover:text-red-400 uppercase tracking-widest flex items-center gap-2 px-4 py-2 rounded-full border border-white/5 transition-colors">
-            <TrashIcon className="w-3.5 h-3.5" /> Clear History
+          <button onClick={clearHistory} className="group flex items-center gap-2 px-5 py-2 rounded-full border border-white/5 hover:border-red-500/30 transition-all">
+            <TrashIcon className="w-4 h-4 text-slate-500 group-hover:text-red-400" />
+            <span className="text-[10px] font-bold text-slate-500 group-hover:text-red-400 uppercase tracking-widest">Clear Storage</span>
           </button>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-8 mt-12 grid grid-cols-1 lg:grid-cols-12 gap-12 pb-32">
-        {/* SIDEBAR: Configuration */}
-        <div className="lg:col-span-4 space-y-10">
-          <section className="space-y-8">
-            <ImageUploader 
-              label="The Subject (Model)" 
-              images={subjectImages} 
-              onImagesUpload={imgs => handleImageUpload(imgs, setSubjectImages)} 
-              onRemove={id => setSubjectImages(p => p.filter(i => i.id !== id))} 
-              icon={<UserIcon className="w-4 h-4 text-indigo-400" />} 
-              maxCount={5} // До 5 фото
-            />
+      <main className="max-w-[1600px] mx-auto px-8 mt-10 grid grid-cols-1 lg:grid-cols-12 gap-10 pb-32">
+        
+        <div className="lg:col-span-4 space-y-8">
+          <div className="bg-[#0f121d] rounded-3xl p-8 border border-white/5 shadow-2xl sticky top-28">
+            <h2 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-8 flex items-center gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-indigo-500"></div> Transmutation Config
+            </h2>
 
-            <div className="space-y-4">
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                <GridIcon className="w-4 h-4" /> Mode & Ratio
-              </label>
-              
-              <div className="grid grid-cols-4 gap-2">
-                {[
-                  { id: GenerationMode.MATCH_STYLE, icon: <ImageIcon className="w-5 h-5" />, label: 'Style' },
-                  { id: GenerationMode.CUSTOM_SCENE, icon: <WandIcon className="w-5 h-5" />, label: 'Custom' },
-                  { id: GenerationMode.CHARACTER_SHEET, icon: <GridIcon className="w-5 h-5" />, label: 'Sheets' },
-                  { id: GenerationMode.RANDOM_CREATIVE, icon: <SparklesIcon className="w-5 h-5" />, label: 'Random' }
-                ].map(m => (
-                  <button 
-                    key={m.id} 
-                    onClick={() => setGenMode(m.id as GenerationMode)}
-                    className={`aspect-square rounded-2xl border transition-all flex items-center justify-center ${
-                      genMode === m.id 
-                      ? 'bg-indigo-600 border-indigo-400 text-white shadow-xl shadow-indigo-500/10' 
-                      : 'bg-slate-900 border-white/5 text-slate-500 hover:border-white/20'
-                    }`}
-                  >
-                    {m.icon}
-                  </button>
-                ))}
-              </div>
-
-              <div className="grid grid-cols-5 gap-1.5 p-1.5 bg-slate-900/50 rounded-2xl border border-white/5">
-                {ASPECT_RATIOS.map(ratio => (
-                  <button
-                    key={ratio.id}
-                    onClick={() => setAspectRatio(ratio.id)}
-                    className={`py-2 text-[10px] font-black rounded-xl transition-all ${
-                      aspectRatio === ratio.id 
-                      ? 'bg-indigo-600 text-white shadow-lg' 
-                      : 'text-slate-500 hover:text-slate-300'
-                    }`}
-                  >
-                    {ratio.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {genMode === GenerationMode.MATCH_STYLE && (
+            <div className="space-y-10">
               <ImageUploader 
-                label="Visual Context (Style)" 
-                images={styleImages} 
-                onImagesUpload={imgs => handleImageUpload(imgs, setStyleImages)} 
-                onRemove={id => setStyleImages(p => p.filter(i => i.id !== id))} 
-                icon={<ImageIcon className="w-4 h-4 text-emerald-400" />} 
-                maxCount={1}
+                label="The Identity (Model)" 
+                images={subjectImages} 
+                onImagesUpload={imgs => handleImageUpload(imgs, setSubjectImages)} 
+                onRemove={id => setSubjectImages(p => p.filter(i => i.id !== id))} 
+                icon={<UserIcon className="w-4 h-4 text-indigo-400" />} 
+                maxCount={5} 
               />
-            )}
 
-            {genMode === GenerationMode.CUSTOM_SCENE && (
-              <textarea 
-                value={customSceneText} 
-                onChange={e => setCustomSceneText(e.target.value)} 
-                placeholder="Describe your scene here..." 
-                className="w-full h-32 bg-slate-900 border border-white/5 rounded-2xl p-4 text-sm text-slate-200 outline-none focus:border-indigo-500/50 transition-colors resize-none shadow-inner" 
-              />
-            )}
-
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Quantity</label>
-                <div className="flex gap-2">
-                  {[1, 3, 5].map(c => (
+              <div className="space-y-4">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                  <GridIcon className="w-4 h-4" /> Mode & Frame
+                </label>
+                
+                <div className="grid grid-cols-4 gap-2">
+                  {[
+                    { id: GenerationMode.MATCH_STYLE, icon: <ImageIcon className="w-5 h-5" />, label: 'Style' },
+                    { id: GenerationMode.CUSTOM_SCENE, icon: <WandIcon className="w-5 h-5" />, label: 'Custom' },
+                    { id: GenerationMode.CHARACTER_SHEET, icon: <GridIcon className="w-5 h-5" />, label: 'Sheets' },
+                    { id: GenerationMode.RANDOM_CREATIVE, icon: <SparklesIcon className="w-5 h-5" />, label: 'Random' }
+                  ].map(m => (
                     <button 
-                      key={c} 
-                      onClick={() => setPromptCount(c)} 
-                      className={`w-8 h-8 rounded-lg text-xs font-black transition-all ${
-                        promptCount === c ? 'bg-slate-200 text-black' : 'text-slate-500 hover:text-white'
+                      key={m.id} 
+                      onClick={() => setGenMode(m.id as GenerationMode)}
+                      title={m.label}
+                      className={`aspect-square rounded-2xl border transition-all flex items-center justify-center ${
+                        genMode === m.id 
+                        ? 'bg-indigo-600 border-indigo-400 text-white shadow-xl shadow-indigo-600/20' 
+                        : 'bg-[#161a27] border-white/5 text-slate-500 hover:border-white/20'
                       }`}
                     >
-                      {c}
+                      {m.icon}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-5 gap-1.5 p-1.5 bg-[#161a27] rounded-2xl border border-white/5">
+                  {ASPECT_RATIOS.map(ratio => (
+                    <button
+                      key={ratio.id}
+                      onClick={() => setAspectRatio(ratio.id)}
+                      className={`flex flex-col items-center py-2 rounded-xl transition-all ${
+                        aspectRatio === ratio.id 
+                        ? 'bg-indigo-600 text-white shadow-lg' 
+                        : 'text-slate-500 hover:text-slate-300'
+                      }`}
+                    >
+                      <span className="text-[10px] font-black">{ratio.label}</span>
                     </button>
                   ))}
                 </div>
               </div>
 
-              <button 
-                onClick={handleGenerate} 
-                disabled={loadingState === LoadingState.ANALYZING} 
-                className="w-full py-5 rounded-3xl font-black bg-white text-black text-xs uppercase tracking-widest hover:bg-indigo-400 hover:text-white transition-all disabled:opacity-30 disabled:hover:bg-white disabled:hover:text-black"
-              >
-                {loadingState === LoadingState.ANALYZING ? 'Processing...' : 'Start Transmutation'}
-              </button>
-              
-              {error && <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-2xl text-[10px] text-red-400 text-center font-bold uppercase">{error}</div>}
+              {genMode === GenerationMode.MATCH_STYLE && (
+                <ImageUploader 
+                  label="Aesthetic Seeds (Style)" 
+                  images={styleImages} 
+                  onImagesUpload={imgs => handleImageUpload(imgs, setStyleImages)} 
+                  onRemove={id => setStyleImages(p => p.filter(i => i.id !== id))} 
+                  icon={<ImageIcon className="w-4 h-4 text-emerald-400" />} 
+                  maxCount={5}
+                />
+              )}
+
+              {genMode === GenerationMode.CUSTOM_SCENE && (
+                <textarea 
+                  value={customSceneText} 
+                  onChange={e => setCustomSceneText(e.target.value)} 
+                  placeholder="Enter scene details..." 
+                  className="w-full h-32 bg-[#161a27] border border-white/5 rounded-2xl p-4 text-sm text-slate-200 outline-none focus:border-indigo-500/50 transition-colors resize-none" 
+                />
+              )}
+
+              <div className="pt-4 space-y-4">
+                <div className="flex items-center justify-between px-2">
+                  <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Variations per image</span>
+                  <div className="flex gap-2">
+                    {[1, 3, 5].map(c => (
+                      <button key={c} onClick={() => setPromptCount(c)} className={`w-8 h-8 rounded-lg text-xs font-black transition-all ${promptCount === c ? 'bg-white text-black' : 'text-slate-500 hover:text-white'}`}>{c}</button>
+                    ))}
+                  </div>
+                </div>
+
+                <button 
+                  onClick={handleGenerate} 
+                  disabled={loadingState === LoadingState.ANALYZING} 
+                  className="w-full py-5 rounded-[2rem] font-black bg-white text-black text-xs uppercase tracking-[0.2em] hover:bg-indigo-500 hover:text-white transition-all shadow-xl disabled:opacity-20 active:scale-95"
+                >
+                  {loadingState === LoadingState.ANALYZING ? 'Processing Intelligence...' : 'Generate Prompts'}
+                </button>
+                {error && <div className="p-3 bg-red-500/5 border border-red-500/20 rounded-2xl text-[10px] text-red-400 text-center font-bold uppercase tracking-widest">{error}</div>}
+              </div>
             </div>
-          </section>
+          </div>
         </div>
 
-        {/* MAIN: Stream of Consciousness */}
         <div className="lg:col-span-8 space-y-12">
           {history.map((group, gIdx) => (
-            <div key={group.id} className="space-y-6">
-              <div className="flex items-center gap-4 px-2">
+            <div key={group.id} className="space-y-8 animate-in fade-in slide-in-from-bottom-6 duration-700">
+              <div className="flex items-center gap-6">
+                <div className="px-4 py-1 bg-white/5 rounded-full border border-white/5">
+                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{new Date(group.timestamp).toLocaleTimeString()}</span>
+                </div>
                 <div className="h-px flex-grow bg-white/5"></div>
-                <span className="text-[10px] font-black text-slate-600 uppercase tracking-[0.3em]">Session {new Date(group.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                <div className="h-px flex-grow bg-white/5"></div>
+                <span className="text-[10px] font-black text-indigo-500 uppercase tracking-[0.3em]">{group.mode}</span>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-1 gap-8">
+              <div className="space-y-6">
                 {group.prompts.map((p, pi) => (
-                  <div key={pi} className="group/card bg-slate-900/30 border border-white/5 rounded-[2.5rem] p-6 flex flex-col md:flex-row gap-8 hover:bg-slate-900/50 transition-colors duration-500 overflow-hidden">
+                  <div key={pi} className="group bg-[#0f121d]/50 border border-white/5 rounded-[2.5rem] p-8 flex flex-col xl:flex-row gap-10 hover:bg-[#0f121d] transition-all duration-500">
                     
-                    {/* Image Result Side */}
-                    <div className="md:w-1/2 aspect-square relative rounded-[2rem] overflow-hidden bg-slate-950 border border-white/5 shadow-2xl">
-                      {p.generatedImageUrl ? (
-                        <img src={p.generatedImageUrl} className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="w-full h-full flex flex-col items-center justify-center gap-4 text-slate-700">
-                          {p.isGenerating ? (
-                            <div className="flex flex-col items-center gap-3">
-                              <div className="w-8 h-8 border-2 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin"></div>
-                              <span className="text-[9px] font-black uppercase tracking-widest text-indigo-400">Forging image...</span>
-                            </div>
-                          ) : (
-                            <div className="flex flex-col items-center gap-3">
-                              <ImageIcon className="w-12 h-12 opacity-20" />
-                              <span className="text-[9px] font-black uppercase tracking-widest opacity-40">Awaiting creation</span>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                      
-                      {p.generatedImageUrl && (
-                        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover/card:opacity-100 transition-opacity flex items-center justify-center">
-                          <a href={p.generatedImageUrl} target="_blank" rel="noreferrer" className="px-6 py-3 bg-white text-black text-[10px] font-black uppercase rounded-full tracking-widest hover:scale-105 transition-transform">Download</a>
-                        </div>
-                      )}
+                    <div className="xl:w-24 flex flex-col items-center gap-3 shrink-0">
+                      <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Source</span>
+                      <div className="w-20 h-20 rounded-2xl overflow-hidden border border-white/10 relative group-hover:border-indigo-500/50 transition-colors">
+                        <img src={p.referenceImage} className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-700" />
+                        <div className="absolute inset-0 bg-indigo-600/10 mix-blend-overlay"></div>
+                      </div>
                     </div>
 
-                    {/* Text Data Side */}
-                    <div className="md:w-1/2 flex flex-col justify-between py-2">
+                    <div className="flex-grow flex flex-col justify-between py-1">
                       <div className="space-y-4">
                         <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">Variant 0{pi + 1}</span>
+                          <h3 className="text-[11px] font-black text-indigo-500 uppercase tracking-[0.2em]">Synthesis Result 0{pi+1}</h3>
                           <div className="flex gap-2">
-                            <button onClick={() => navigator.clipboard.writeText(p.text)} className="p-2 hover:bg-white/5 rounded-full text-slate-500 hover:text-white transition-colors">
+                            <button onClick={() => navigator.clipboard.writeText(p.text)} className="p-2.5 bg-white/5 hover:bg-white/10 text-slate-500 hover:text-white rounded-xl transition-all" title="Copy Prompt">
                               <CopyIcon className="w-4 h-4" />
                             </button>
                             <button 
                               onClick={() => handleGenImage(gIdx, pi)} 
                               disabled={p.isGenerating}
-                              className={`px-6 py-2 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${
-                                p.isGenerating ? 'bg-slate-800 text-slate-600' : 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20 hover:bg-indigo-500'
+                              className={`px-8 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                                p.isGenerating ? 'bg-slate-800 text-slate-600 cursor-not-allowed' : 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20 hover:scale-105 active:scale-95'
                               }`}
                             >
-                              {p.isGenerating ? 'Wait...' : 'Render'}
+                              {p.isGenerating ? 'Rendering...' : 'Render Image'}
                             </button>
                           </div>
                         </div>
-                        <p className="text-sm leading-relaxed text-slate-300 font-medium selection:bg-indigo-500/30">{p.text}</p>
+                        <p className="text-sm leading-relaxed text-slate-300 font-medium italic selection:bg-indigo-500/30">"{p.text}"</p>
                       </div>
-
-                      {p.error && <p className="mt-4 text-[9px] text-red-400 font-bold bg-red-400/5 p-3 rounded-2xl border border-red-400/10 italic">! {p.error}</p>}
+                      {p.error && <p className="mt-4 text-[9px] text-red-400 font-bold bg-red-400/5 p-3 rounded-2xl border border-red-400/10">! {p.error}</p>}
                     </div>
+
+                    <div className="xl:w-72 aspect-square shrink-0 rounded-[2rem] overflow-hidden bg-black border border-white/5 shadow-2xl group-hover:border-white/10 transition-colors relative">
+                      {p.generatedImageUrl ? (
+                        <div className="w-full h-full group/img relative bg-slate-900">
+                          <img 
+                            src={p.generatedImageUrl} 
+                            className="w-full h-full object-contain animate-in fade-in zoom-in-95 duration-500" 
+                            alt="Generated"
+                          />
+                          <div className="absolute inset-0 bg-black/60 opacity-0 group-hover/img:opacity-100 transition-opacity flex flex-col items-center justify-center gap-3">
+                            <button 
+                              onClick={() => handleDownload(p.generatedImageUrl!, `alchemy-render-${Date.now()}.png`)}
+                              className="px-6 py-3 bg-white text-black text-[10px] font-black uppercase rounded-full tracking-widest hover:scale-110 transition-transform flex items-center gap-2"
+                            >
+                              <SparklesIcon className="w-4 h-4" /> Save to Device
+                            </button>
+                            <a 
+                              href={p.generatedImageUrl} 
+                              target="_blank" 
+                              rel="noreferrer" 
+                              className="px-6 py-2 bg-white/10 text-white text-[10px] font-bold uppercase rounded-full tracking-widest hover:bg-white/20 transition-all"
+                            >
+                              Full Resolution
+                            </a>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="w-full h-full flex flex-col items-center justify-center gap-4 text-slate-800">
+                          {p.isGenerating ? (
+                            <div className="flex flex-col items-center gap-4">
+                              <div className="w-10 h-10 border-2 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin"></div>
+                              <span className="text-[8px] font-black uppercase tracking-[0.3em] text-indigo-500 animate-pulse">Forging Visuals...</span>
+                            </div>
+                          ) : (
+                            <div className="flex flex-col items-center gap-3 opacity-20">
+                              <ImageIcon className="w-12 h-12" />
+                              <span className="text-[8px] font-black uppercase tracking-widest">Ready for Render</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
                   </div>
                 ))}
               </div>
@@ -382,9 +423,9 @@ const App: React.FC = () => {
           ))}
 
           {history.length === 0 && (
-            <div className="h-96 flex flex-col items-center justify-center text-slate-800 border-2 border-dashed border-white/5 rounded-[4rem]">
-              <SparklesIcon className="w-16 h-16 mb-6 opacity-5" />
-              <p className="text-xs font-black uppercase tracking-[0.4em] opacity-10">Waiting for first reaction</p>
+            <div className="h-[600px] flex flex-col items-center justify-center text-slate-900 border-2 border-dashed border-white/5 rounded-[4rem]">
+              <SparklesIcon className="w-20 h-20 mb-8 opacity-5" />
+              <p className="text-sm font-black uppercase tracking-[0.5em] opacity-10">Studio Idle • Ready for Alchemy</p>
             </div>
           )}
         </div>
