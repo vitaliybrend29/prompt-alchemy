@@ -80,20 +80,25 @@ export const createTask = async (
   const apiKey = getApiKey();
   if (!apiKey) throw new Error("API KEY missing");
 
-  // В точности повторяем структуру из вашего рабочего лога
-  const inputPayload: any = {
-    prompt,
-    aspect_ratio: aspectRatio,
-    resolution: usePro ? "1K" : undefined,
-    image_urls: faceUrls,
-    output_format: "png"
-  };
+  let inputPayload: any;
 
-  // Если не Pro, API может ожидать image_size вместо aspect_ratio
-  if (!usePro) {
-    inputPayload.image_size = aspectRatio;
-    delete inputPayload.aspect_ratio;
-    delete inputPayload.resolution;
+  if (usePro) {
+    // Формат для NANO-BANANA-PRO
+    inputPayload = {
+      prompt,
+      aspect_ratio: aspectRatio,
+      resolution: "1K",
+      image_input: faceUrls, // Ключевое изменение: image_input для Pro
+      output_format: "png"
+    };
+  } else {
+    // Формат для GOOGLE/NANO-BANANA-EDIT
+    inputPayload = {
+      prompt,
+      image_size: aspectRatio, // Обычная модель часто требует image_size
+      image_urls: faceUrls,
+      output_format: "png"
+    };
   }
 
   const payload = {
