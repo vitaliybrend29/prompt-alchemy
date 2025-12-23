@@ -4,7 +4,7 @@ import ImageUploader from './components/ImageUploader';
 import { UploadedImage, LoadingState, GenerationMode, PromptGroup, GeneratedPrompt } from './types';
 import { generatePrompts } from './services/geminiService';
 import { createTask, pollTaskStatus } from './services/imageGenerationService';
-import { WandIcon, CopyIcon, SparklesIcon, ImageIcon, UserIcon, TrashIcon, GridIcon, PlayIcon } from './components/Icons';
+import { WandIcon, CopyIcon, SparklesIcon, ImageIcon, UserIcon, TrashIcon, GridIcon } from './components/Icons';
 
 const MAX_HISTORY_ITEMS = 30;
 
@@ -151,6 +151,8 @@ const App: React.FC = () => {
   };
 
   const handleGenerate = async () => {
+    const isUploading = subjectImages.some(i => !i.publicUrl) || (genMode === GenerationMode.MATCH_STYLE && styleImages.some(i => !i.publicUrl));
+    if (isUploading) { setError("Wait for images to finish uploading..."); return; }
     if (subjectImages.length === 0) { setError("Upload model photos."); return; }
     if (genMode === GenerationMode.MATCH_STYLE && styleImages.length === 0) { setError("Upload style references."); return; }
     
@@ -187,19 +189,12 @@ const App: React.FC = () => {
 
     try {
       const faceUrls = group.subjectReferences;
-      if (faceUrls.length === 0) throw new Error("Upload not finished.");
+      if (faceUrls.length === 0) throw new Error("Reference URLs missing. Re-upload images.");
       
       const taskId = await createTask(prompt.text, faceUrls, aspectRatio, isPro, callbackUrl);
       resumePolling(groupIdx, promptIdx, taskId);
     } catch (err: any) {
       setError(err.message);
-    }
-  };
-
-  const clearHistory = () => {
-    if (confirm("Reset History?")) {
-      setHistory([]);
-      localStorage.removeItem('alchemy_v7_history');
     }
   };
 
@@ -213,12 +208,12 @@ const App: React.FC = () => {
             </div>
             <div>
               <h1 className="text-lg font-black tracking-tighter text-white uppercase italic">Alchemist Studio</h1>
-              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none">Intelligence v7.1</p>
+              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none">Identity Engine v7.2</p>
             </div>
           </div>
-          <button onClick={clearHistory} className="group flex items-center gap-2 px-5 py-2 rounded-full border border-white/5 hover:border-red-500/30 transition-all">
+          <button onClick={() => setHistory([])} className="group flex items-center gap-2 px-5 py-2 rounded-full border border-white/5 hover:border-red-500/30 transition-all">
             <TrashIcon className="w-4 h-4 text-slate-500 group-hover:text-red-400" />
-            <span className="text-[10px] font-bold text-slate-500 group-hover:text-red-400 uppercase tracking-widest">Clear Storage</span>
+            <span className="text-[10px] font-bold text-slate-500 group-hover:text-red-400 uppercase tracking-widest">Clear History</span>
           </button>
         </div>
       </header>
@@ -250,7 +245,6 @@ const App: React.FC = () => {
                     <GridIcon className="w-4 h-4" /> Mode & Frame
                   </label>
                   
-                  {/* PRO TOGGLE */}
                   <button 
                     onClick={() => setIsPro(!isPro)}
                     className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all ${
@@ -322,15 +316,6 @@ const App: React.FC = () => {
               )}
 
               <div className="pt-4 space-y-4">
-                <div className="flex items-center justify-between px-2">
-                  <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Variations per image</span>
-                  <div className="flex gap-2">
-                    {[1, 3, 5].map(c => (
-                      <button key={c} onClick={() => setPromptCount(c)} className={`w-8 h-8 rounded-lg text-xs font-black transition-all ${promptCount === c ? 'bg-white text-black' : 'text-slate-500 hover:text-white'}`}>{c}</button>
-                    ))}
-                  </div>
-                </div>
-
                 <button 
                   onClick={handleGenerate} 
                   disabled={loadingState === LoadingState.ANALYZING} 
@@ -374,7 +359,6 @@ const App: React.FC = () => {
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-3">
                             <h3 className="text-[11px] font-black text-indigo-500 uppercase tracking-[0.2em]">Synthesis Result 0{pi+1}</h3>
-                            {isPro && <span className="text-[8px] bg-indigo-600/20 text-indigo-400 px-2 py-0.5 rounded border border-indigo-500/30 font-black">PRO</span>}
                           </div>
                           <div className="flex gap-2">
                             <button onClick={() => navigator.clipboard.writeText(p.text)} className="p-2.5 bg-white/5 hover:bg-white/10 text-slate-500 hover:text-white rounded-xl transition-all" title="Copy Prompt">
@@ -382,12 +366,12 @@ const App: React.FC = () => {
                             </button>
                             <button 
                               onClick={() => handleGenImage(gIdx, pi)} 
-                              disabled={p.isGenerating}
+                              disabled={p.isGenerating || group.subjectReferences.length === 0}
                               className={`px-8 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
                                 p.isGenerating ? 'bg-slate-800 text-slate-600 cursor-not-allowed' : 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20 hover:scale-105 active:scale-95'
                               }`}
                             >
-                              {p.isGenerating ? 'Rendering...' : `Render ${isPro ? 'Pro' : ''}`}
+                              {p.isGenerating ? 'Rendering...' : 'Render Image'}
                             </button>
                           </div>
                         </div>
@@ -411,14 +395,6 @@ const App: React.FC = () => {
                             >
                               <SparklesIcon className="w-4 h-4" /> Save to Device
                             </button>
-                            <a 
-                              href={p.generatedImageUrl} 
-                              target="_blank" 
-                              rel="noreferrer" 
-                              className="px-6 py-2 bg-white/10 text-white text-[10px] font-bold uppercase rounded-full tracking-widest hover:bg-white/20 transition-all"
-                            >
-                              Full Resolution
-                            </a>
                           </div>
                         </div>
                       ) : (
@@ -426,7 +402,7 @@ const App: React.FC = () => {
                           {p.isGenerating ? (
                             <div className="flex flex-col items-center gap-4">
                               <div className="w-10 h-10 border-2 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin"></div>
-                              <span className="text-[8px] font-black uppercase tracking-[0.3em] text-indigo-500 animate-pulse">Forging {isPro ? 'Pro' : ''} Visuals...</span>
+                              <span className="text-[8px] font-black uppercase tracking-[0.3em] text-indigo-500 animate-pulse">Forging Visuals...</span>
                             </div>
                           ) : (
                             <div className="flex flex-col items-center gap-3 opacity-20">

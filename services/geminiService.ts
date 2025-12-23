@@ -20,31 +20,30 @@ export const generatePrompts = async (
 ): Promise<{ text: string; referenceImage?: string }[]> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  let systemInstruction = `You are a world-class Midjourney Prompt Engineer.
-  TASK: Generate detailed, professional visual prompts.
+  let systemInstruction = `You are a world-class Midjourney & Stable Diffusion Prompt Engineer.
+  TASK: Generate detailed visual prompts that ensure high subject likeness.
   
-  IDENTITY PRESERVATION:
-  - Subject images provided are of the SAME person. Analyze all to capture their essence.
-  - Describe the person's features (face, hair, build) directly in the prompt to ensure consistency.
+  IDENTITY PRESERVATION (CRITICAL):
+  - You must analyze the subject's physical identity. 
+  - Instead of "a person" or "the model", describe their SPECIFIC features: face shape, eye color and shape, nose structure, lip fullness, hair texture/length, and skin tone.
+  - This "physical description" acts as a text-based backup for the face-ID system.
   
   STYLE MAPPING:
-  - If multiple Style References are provided: Generate ${count} unique prompts for EACH style image.
-  - Return the 'imageIndex' corresponding to the specific style image used.
+  - If Style References are provided: Place the subject into that specific aesthetic/lighting.
+  - Return the 'imageIndex' corresponding to the style image used.
   
   CLOTHING:
-  - Specify form-fitting, athletic, or high-fashion clothing that emphasizes a fit silhouette.
+  - Specify detailed textures and fit.
   
   Output MUST be valid JSON.`;
 
   const parts: any[] = [];
   
-  // Добавляем фото модели
   if (subjectImages.length > 0) {
-    parts.push({ text: `SUBJECT/IDENTITY PHOTOS (Use these for person's appearance):` });
+    parts.push({ text: `SUBJECT PHOTOS for Identity analysis:` });
     subjectImages.forEach(img => parts.push({ inlineData: { mimeType: img.mimeType, data: cleanBase64(img.base64) } }));
   }
 
-  // Добавляем фото стилей (если есть)
   if (styleImages.length > 0 && mode === GenerationMode.MATCH_STYLE) {
     parts.push({ text: `STYLE REFERENCE PHOTOS:` });
     styleImages.forEach((img, idx) => {
@@ -53,19 +52,13 @@ export const generatePrompts = async (
     });
     
     parts.push({ text: `
-      ACTION: For EACH Style Image provided above, generate ${count} prompts.
-      Each prompt should place the Subject into the aesthetic, lighting, and environment of that specific Style Image.
-      Return imageIndex for the Style Image used.
+      ACTION: Create ${count} prompts for EACH Style Image. 
+      In each prompt, FIRST describe the subject's unique physical features accurately, THEN the style/environment.
     ` });
   } 
-  else if (mode === GenerationMode.CHARACTER_SHEET) {
-    parts.push({ text: `Generate ${count} prompts for a character sheet (front, side, back views) for the subject.` });
-  }
-  else if (mode === GenerationMode.CUSTOM_SCENE) {
-    parts.push({ text: `Generate ${count} prompts for the subject in this scene: "${customText}".` });
-  }
   else {
-    parts.push({ text: `Generate ${count} creative high-fashion prompts for the subject.` });
+    parts.push({ text: `Generate ${count} prompts. Focus heavily on describing the subject's physical traits to maintain identity.` });
+    if (customText) parts.push({ text: `Context: ${customText}` });
   }
 
   try {
@@ -83,7 +76,7 @@ export const generatePrompts = async (
               items: {
                 type: Type.OBJECT,
                 properties: {
-                  imageIndex: { type: Type.INTEGER, description: "Index of the reference image used" },
+                  imageIndex: { type: Type.INTEGER },
                   prompts: { type: Type.ARRAY, items: { type: Type.STRING } }
                 },
                 required: ["imageIndex", "prompts"]
@@ -100,10 +93,9 @@ export const generatePrompts = async (
 
     parsed.results.forEach(res => {
       const idx = res.imageIndex || 0;
-      // Если есть стили - берем стиль, если нет - берем фото субъекта
       const refImg = (mode === GenerationMode.MATCH_STYLE && styleImages.length > 0)
         ? styleImages[idx]?.base64 || styleImages[0]?.base64 
-        : subjectImages[idx]?.base64 || subjectImages[0]?.base64;
+        : subjectImages[0]?.base64;
 
       res.prompts.forEach(p => finalPrompts.push({ text: p, referenceImage: refImg }));
     });
