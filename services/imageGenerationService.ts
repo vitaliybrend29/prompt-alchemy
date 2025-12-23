@@ -7,16 +7,10 @@ const getApiKey = () => {
   return (key && key !== 'undefined') ? key : null;
 };
 
-/**
- * Опрашивает API для получения статуса задачи.
- * Строго следует формату GET /recordInfo?taskId=...
- */
 export const pollTaskStatus = async (taskId: string): Promise<string> => {
   const apiKey = getApiKey();
-  const maxAttempts = 120; // Ожидание до 10-12 минут
+  const maxAttempts = 120;
   let attempts = 0;
-  
-  // Формируем URL с query-параметром taskId
   const statusUrl = `${KIE_API_JOBS_BASE}/recordInfo?taskId=${taskId}`;
 
   while (attempts < maxAttempts) {
@@ -36,8 +30,6 @@ export const pollTaskStatus = async (taskId: string): Promise<string> => {
       }
 
       const raw = await response.json();
-      
-      // По спецификации: { code: 200, data: { state: "...", resultJson: "..." } }
       if (raw.code !== 200 || !raw.data) {
         attempts++;
         await new Promise(r => setTimeout(r, 5000));
@@ -47,12 +39,8 @@ export const pollTaskStatus = async (taskId: string): Promise<string> => {
       const result = raw.data;
       const state = (result.state || "").toLowerCase();
       
-      console.log(`[Polling] Task: ${taskId}, State: ${state}`);
-
       if (state === "success" || state === "completed") {
         let foundUrl = "";
-        
-        // Обработка resultJson (как в вашем примере - это строка с JSON)
         if (result.resultJson) {
           try {
             const parsed = typeof result.resultJson === 'string' 
@@ -66,29 +54,23 @@ export const pollTaskStatus = async (taskId: string): Promise<string> => {
             console.warn("Error parsing resultJson:", e);
           }
         }
-
-        // Запасные варианты
         if (!foundUrl) foundUrl = result.imageUrl || result.resultUrl || (result.result?.resultUrls ? result.result.resultUrls[0] : "");
-        
         if (foundUrl) return foundUrl;
       }
 
       if (state === "fail" || state === "failed" || state === "error") {
         throw new Error(result.failMsg || "Generation failed on server");
       }
-
     } catch (e: any) {
       if (e.message.includes("failed")) throw e;
-      console.error("Polling error:", e);
     }
-
     await new Promise(r => setTimeout(r, 5000));
     attempts++;
   }
-  throw new Error("Polling timeout: Image is taking too long to generate.");
+  throw new Error("Polling timeout.");
 };
 
-export const createTask = async (prompt: string, faceUrl: string, callbackUrl?: string): Promise<string> => {
+export const createTask = async (prompt: string, faceUrls: string[], aspectRatio: string = "1:1", callbackUrl?: string): Promise<string> => {
   const apiKey = getApiKey();
   if (!apiKey) throw new Error("API KEY missing");
 
@@ -96,15 +78,13 @@ export const createTask = async (prompt: string, faceUrl: string, callbackUrl?: 
     model: "google/nano-banana-edit",
     input: {
       prompt,
-      image_urls: [faceUrl],
+      image_urls: faceUrls, // Теперь передаем массив всех фото модели
       output_format: "png",
-      image_size: "1:1"
+      image_size: aspectRatio // Передаем выбранное соотношение
     }
   };
 
-  if (callbackUrl) {
-    payload.callBackUrl = callbackUrl;
-  }
+  if (callbackUrl) payload.callBackUrl = callbackUrl;
 
   const res = await fetch(CREATE_TASK_URL, {
     method: "POST",
@@ -117,7 +97,6 @@ export const createTask = async (prompt: string, faceUrl: string, callbackUrl?: 
 
   const data = await res.json();
   const taskId = data.data?.taskId || data.taskId;
-  
   if (!taskId) throw new Error(data.message || "Failed to create task");
   return taskId;
 };
