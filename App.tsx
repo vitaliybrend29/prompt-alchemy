@@ -1,10 +1,10 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import ImageUploader from './components/ImageUploader';
 import { UploadedImage, LoadingState, GenerationMode, PromptGroup, GeneratedPrompt } from './types';
 import { generatePrompts } from './services/geminiService';
 import { startImageGenerationTask, monitorTaskProgress } from './services/imageGenerationService';
-import { WandIcon, CopyIcon, SparklesIcon, ImageIcon, UserIcon, TrashIcon, GridIcon, PlayIcon, DownloadIcon } from './components/Icons';
+import { WandIcon, CopyIcon, SparklesIcon, ImageIcon, UserIcon, TrashIcon, GridIcon, PlayIcon, DownloadIcon, SettingsIcon } from './components/Icons';
 
 type ResolutionType = "Standard" | "1K" | "2K" | "4K";
 
@@ -28,8 +28,16 @@ const App: React.FC = () => {
   const [loadingState, setLoadingState] = useState<LoadingState>(LoadingState.IDLE);
   const [error, setError] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [showVault, setShowVault] = useState<boolean>(false);
   
   const [selectedPrompts, setSelectedPrompts] = useState<Set<string>>(new Set());
+
+  // Вычисляем все сгенерированные URL для галереи
+  const allGeneratedImages = useMemo(() => {
+    return history.flatMap(group => 
+      group.prompts.flatMap(p => p.generatedImageUrls || [])
+    );
+  }, [history]);
 
   useEffect(() => {
     const saved = localStorage.getItem('alchemy_v11_history');
@@ -149,7 +157,6 @@ const App: React.FC = () => {
     setError(null);
     setLoadingState(LoadingState.ANALYZING);
     try {
-      // Каждый стиль теперь анализируется отдельно в GeminiService
       const results = await generatePrompts(styleImages, subjectImages, promptCount, genMode, customSceneText);
       const newGroup: PromptGroup = {
         id: Date.now().toString(),
@@ -202,12 +209,70 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#06080d] text-slate-300 font-sans">
+      {/* Full Preview Modal */}
       {previewImage && (
         <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setPreviewImage(null)}>
-          <img src={previewImage} className="max-w-full max-h-full rounded-lg shadow-2xl animate-in zoom-in-95 duration-300" />
+          <img src={previewImage} className="max-w-full max-h-full rounded-lg shadow-2xl animate-in zoom-in-95 duration-300 border border-white/10" />
         </div>
       )}
 
+      {/* Artifact Vault Modal (Gallery) */}
+      {showVault && (
+        <div className="fixed inset-0 z-[90] bg-black/98 flex flex-col p-8 animate-in fade-in duration-300">
+          <div className="max-w-7xl mx-auto w-full flex-grow flex flex-col">
+            <div className="flex items-center justify-between mb-10">
+              <div className="flex items-center gap-4">
+                <div className="p-3 bg-indigo-600/20 rounded-2xl border border-indigo-500/30">
+                  <GridIcon className="w-6 h-6 text-indigo-400" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-black uppercase tracking-widest text-white italic leading-none mb-1">Artifact Vault</h2>
+                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{allGeneratedImages.length} Transmutations Recorded</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowVault(false)}
+                className="bg-white/5 hover:bg-white/10 text-white w-12 h-12 rounded-full flex items-center justify-center transition-all border border-white/5"
+              >
+                <TrashIcon className="w-5 h-5 rotate-45" /> {/* Using TrashIcon rotated as close for simplicity in existing Icons.tsx */}
+              </button>
+            </div>
+
+            <div className="flex-grow overflow-y-auto pr-4 scroll-smooth">
+              {allGeneratedImages.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center opacity-20">
+                  <ImageIcon className="w-20 h-20 mb-6" />
+                  <span className="text-xs font-black uppercase tracking-[0.5em]">Vault is empty</span>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 pb-20">
+                  {allGeneratedImages.map((url, idx) => (
+                    <div key={idx} className="relative aspect-square group/vault-img rounded-[2rem] overflow-hidden bg-black border border-white/5 shadow-2xl transition-all hover:border-indigo-500/50">
+                      <img src={url} className="w-full h-full object-cover transition-transform duration-700 group-hover/vault-img:scale-110" />
+                      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover/vault-img:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                        <button 
+                          onClick={() => setPreviewImage(url)} 
+                          className="p-3 bg-indigo-600 rounded-full text-white hover:scale-110 active:scale-90 transition-all shadow-lg"
+                        >
+                          <PlayIcon className="w-5 h-5 fill-current" />
+                        </button>
+                        <button 
+                          onClick={() => handleDownload(url)} 
+                          className="p-3 bg-emerald-600 rounded-full text-white hover:scale-110 active:scale-90 transition-all shadow-lg"
+                        >
+                          <DownloadIcon className="w-5 h-5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Bulk Action Bar */}
       {selectedPrompts.size > 0 && (
         <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 bg-indigo-600 px-6 py-4 rounded-full shadow-2xl flex items-center gap-8 animate-in slide-in-from-bottom-10 duration-300">
           <span className="text-xs font-black uppercase tracking-widest text-white whitespace-nowrap">
@@ -238,9 +303,20 @@ const App: React.FC = () => {
             </div>
             <h1 className="text-sm font-black uppercase tracking-widest text-white italic">Alchemist Engine</h1>
           </div>
-          <button onClick={() => setHistory([])} className="text-[10px] font-bold text-slate-600 hover:text-red-400 uppercase tracking-widest transition-colors flex items-center gap-2">
-            <TrashIcon className="w-3 h-3" /> Clear Lab
-          </button>
+          
+          <div className="flex items-center gap-4">
+            <button 
+              onClick={() => setShowVault(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-indigo-600/20 text-slate-300 hover:text-indigo-400 border border-white/5 rounded-full transition-all text-[10px] font-black uppercase tracking-widest"
+            >
+              <GridIcon className="w-3.5 h-3.5" />
+              Open Vault <span className="opacity-40">({allGeneratedImages.length})</span>
+            </button>
+            <div className="w-px h-4 bg-white/10 mx-1"></div>
+            <button onClick={() => setHistory([])} className="text-[10px] font-bold text-slate-600 hover:text-red-400 uppercase tracking-widest transition-colors flex items-center gap-2">
+              <TrashIcon className="w-3 h-3" /> Clear Lab
+            </button>
+          </div>
         </div>
       </header>
 
