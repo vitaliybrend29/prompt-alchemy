@@ -18,7 +18,7 @@ const getApiKey = () => {
  */
 export const pollTaskStatus = async (taskId: string): Promise<string> => {
   const apiKey = getApiKey();
-  const maxAttempts = 100; // Увеличили время ожидания для фоновых задач
+  const maxAttempts = 100;
   let attempts = 0;
   const statusUrl = `${KIE_API_JOBS_BASE}/${taskId}`;
 
@@ -65,7 +65,6 @@ export const pollTaskStatus = async (taskId: string): Promise<string> => {
 
     } catch (e: any) {
       console.warn("Polling error:", e.message);
-      // Не прерываемся при сетевых ошибках
     }
 
     await new Promise(resolve => setTimeout(resolve, 5000));
@@ -75,7 +74,7 @@ export const pollTaskStatus = async (taskId: string): Promise<string> => {
 };
 
 /**
- * Создание задачи генерации (возвращает только taskId)
+ * Создание задачи генерации
  */
 export const createTask = async (prompt: string, faceUrl: string, callbackUrl?: string): Promise<string> => {
   const apiKey = getApiKey();
@@ -91,8 +90,12 @@ export const createTask = async (prompt: string, faceUrl: string, callbackUrl?: 
     }
   };
 
+  // Дублируем ключ в разных регистрах для надежности
   if (callbackUrl && callbackUrl.trim().startsWith('http')) {
-    payload.callBackUrl = callbackUrl.trim();
+    const url = callbackUrl.trim();
+    payload.callBackUrl = url;
+    payload.callback_url = url; // Альтернативный вариант для некоторых версий API
+    payload.callbackUrl = url;  // Еще один вариант
   }
 
   const createResponse = await fetch(CREATE_TASK_URL, {
@@ -107,13 +110,13 @@ export const createTask = async (prompt: string, faceUrl: string, callbackUrl?: 
   const createResult = await createResponse.json();
   const taskId = createResult.data?.taskId || createResult.taskId || createResult.data?.id;
   
-  if (!taskId) throw new Error("No taskId returned");
+  if (!taskId) {
+    console.error("Full API Response:", createResult);
+    throw new Error(createResult.msg || "No taskId returned");
+  }
   return taskId;
 };
 
-/**
- * Обертка для полной генерации (создание + ожидание)
- */
 export const generateGeminiImage = async (prompt: string, faceUrl: string, callbackUrl?: string): Promise<string> => {
   const taskId = await createTask(prompt, faceUrl, callbackUrl);
   return await pollTaskStatus(taskId);

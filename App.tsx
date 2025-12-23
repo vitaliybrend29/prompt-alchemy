@@ -43,15 +43,12 @@ const App: React.FC = () => {
     : '';
   const [callbackUrl, setCallbackUrl] = useState(localStorage.getItem('kie_callback_url') || defaultCallback);
 
-  // Инициализация истории и восстановление задач
   useEffect(() => {
     const saved = localStorage.getItem('prompt_alchemy_v5');
     if (saved) {
       try {
         const parsedHistory: PromptGroup[] = JSON.parse(saved);
         setHistory(parsedHistory);
-        
-        // Авто-возобновление задач, которые были в процессе
         parsedHistory.forEach((group, gIdx) => {
           group.prompts.forEach((prompt, pIdx) => {
             if (prompt.taskId && !prompt.generatedImageUrl && !prompt.error) {
@@ -64,6 +61,25 @@ const App: React.FC = () => {
       }
     }
   }, []);
+
+  const testWebhook = async () => {
+    try {
+      const response = await fetch(callbackUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          test: true, 
+          taskId: "test_" + Date.now(),
+          status: "success",
+          data: { state: "success", imageUrl: "https://via.placeholder.com/150" }
+        })
+      });
+      const data = await response.json();
+      alert("Webhook Reachable! Response: " + JSON.stringify(data));
+    } catch (e: any) {
+      alert("Webhook Error: " + e.message);
+    }
+  };
 
   useEffect(() => {
     const checkApiKey = async () => {
@@ -210,14 +226,12 @@ const App: React.FC = () => {
       const faceRef = group.subjectReferences[0];
       const taskId = await createTask(promptObj.text, faceRef, callbackUrl);
       
-      // Обновляем taskId в истории сразу
       setHistory(prev => {
         const next = [...prev];
         next[groupIndex].prompts[promptIndex] = { ...next[groupIndex].prompts[promptIndex], taskId: taskId };
         return next;
       });
 
-      // Начинаем опрос
       const imageUrl = await pollTaskStatus(taskId);
       
       setHistory(prev => {
@@ -263,19 +277,18 @@ const App: React.FC = () => {
                   <input type="password" value={imgbbKey} onChange={(e) => setImgbbKey(e.target.value)} placeholder="ImgBB API Key..." className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white outline-none" />
                 </div>
                 <div className="space-y-4 border-l border-slate-800 pl-0 md:pl-6">
-                  <h3 className="text-sm font-bold text-white flex items-center gap-2"><GridIcon className="w-4 h-4 text-sky-400" /> Site Webhook</h3>
-                  <p className="text-[11px] text-slate-400">This URL receives results directly to your site's backend.</p>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2"><GridIcon className="w-4 h-4 text-sky-400" /> Webhook Test</h3>
+                  <p className="text-[11px] text-slate-400">Current URL: {callbackUrl}</p>
                   <div className="flex gap-2">
-                    <input 
-                      type="text" 
-                      value={callbackUrl} 
-                      onChange={(e) => setCallbackUrl(e.target.value)} 
-                      placeholder="https://..." 
-                      className="flex-grow bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white outline-none focus:ring-1 focus:ring-sky-500" 
-                    />
+                    <button 
+                      onClick={testWebhook}
+                      className="flex-grow py-2 bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold rounded-lg transition-colors"
+                    >
+                      Send Test Callback
+                    </button>
                     <button 
                       onClick={() => setCallbackUrl(defaultCallback)}
-                      className="px-2 py-1 text-[9px] bg-slate-800 hover:bg-slate-700 rounded border border-slate-600 text-slate-300 transition-colors"
+                      className="px-3 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-600 text-slate-300 text-xs"
                     >
                       Reset
                     </button>
