@@ -243,6 +243,19 @@ const App: React.FC = () => {
               </div>
             </div>
 
+            {/* Поле для Custom Scene Text */}
+            {genMode === GenerationMode.CUSTOM_SCENE && (
+              <div className="space-y-2 animate-in fade-in slide-in-from-top-2 duration-300">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] block">Scene Description</label>
+                <textarea 
+                  value={customSceneText} 
+                  onChange={e => setCustomSceneText(e.target.value)}
+                  placeholder="Describe where the person should be (e.g. 'walking in a neon cyberpunk alleyway')..."
+                  className="w-full bg-black/40 border border-white/5 rounded-2xl p-4 text-xs italic text-slate-300 focus:border-indigo-500 transition-colors h-24 resize-none outline-none"
+                />
+              </div>
+            )}
+
             <div>
               <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4 block">4. Aspect Ratio</label>
               <div className="grid grid-cols-5 gap-2">
