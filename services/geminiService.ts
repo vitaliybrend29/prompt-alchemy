@@ -20,45 +20,40 @@ export const generatePrompts = async (
 ): Promise<{ text: string; referenceImage?: string }[]> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  let systemInstruction = `You are a world-class Midjourney & Stable Diffusion Prompt Engineer.
-  TASK: Generate detailed visual prompts that ensure high subject likeness.
+  let systemInstruction = `You are a professional AI Prompt Engineer specializing in high-end fashion and lifestyle photography.
   
-  IDENTITY PRESERVATION (CRITICAL):
-  - You must analyze the subject's physical identity. 
-  - Instead of "a person" or "the model", describe their SPECIFIC features: face shape, eye color and shape, nose structure, lip fullness, hair texture/length, and skin tone.
-  - This "physical description" acts as a text-based backup for the face-ID system.
+  STYLE GUIDE (Follow this EXACTLY):
+  - Start with shot type and subject: "A full-body portrait of a beautiful woman..."
+  - Describe physical features based on photos: "long flowing hair, specific eye color, lip shape."
+  - Describe clothing in detail: "form-fitting athletic top, matching leggings, silk dress, etc."
+  - Describe the ENVIRONMENT/BACKGROUND: "modern bedroom with soft curtains, minimalist bed, luxury hotel lobby, etc."
+  - Describe LIGHTING: "brightly lit, clean natural light from a window, soft and airy atmosphere."
+  - End with technical keywords: "professional photography, 8k, highly detailed, masterwork."
   
-  STYLE MAPPING:
-  - If Style References are provided: Place the subject into that specific aesthetic/lighting.
-  - Return the 'imageIndex' corresponding to the style image used.
-  
-  CLOTHING:
-  - Specify detailed textures and fit.
+  TASK:
+  Generate prompts that act as a "Physical Passport" for the subject. Do not use generic terms like "the girl". Describe HER.
   
   Output MUST be valid JSON.`;
 
   const parts: any[] = [];
   
   if (subjectImages.length > 0) {
-    parts.push({ text: `SUBJECT PHOTOS for Identity analysis:` });
+    parts.push({ text: `REFERENCE SUBJECT PHOTOS:` });
     subjectImages.forEach(img => parts.push({ inlineData: { mimeType: img.mimeType, data: cleanBase64(img.base64) } }));
   }
 
   if (styleImages.length > 0 && mode === GenerationMode.MATCH_STYLE) {
-    parts.push({ text: `STYLE REFERENCE PHOTOS:` });
+    parts.push({ text: `ARTISTIC STYLE REFERENCES:` });
     styleImages.forEach((img, idx) => {
-      parts.push({ text: `Style Image [${idx}]:` });
+      parts.push({ text: `Style [${idx}]:` });
       parts.push({ inlineData: { mimeType: img.mimeType, data: cleanBase64(img.base64) } });
     });
     
-    parts.push({ text: `
-      ACTION: Create ${count} prompts for EACH Style Image. 
-      In each prompt, FIRST describe the subject's unique physical features accurately, THEN the style/environment.
-    ` });
+    parts.push({ text: `Create ${count} prompts for each style. Blend the subject's identity into these styles.` });
   } 
   else {
-    parts.push({ text: `Generate ${count} prompts. Focus heavily on describing the subject's physical traits to maintain identity.` });
-    if (customText) parts.push({ text: `Context: ${customText}` });
+    parts.push({ text: `Generate ${count} highly descriptive prompts based on the subject's appearance.` });
+    if (customText) parts.push({ text: `Scene Context: ${customText}` });
   }
 
   try {

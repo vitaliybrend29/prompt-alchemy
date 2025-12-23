@@ -37,7 +37,7 @@ const App: React.FC = () => {
   const [subjectImages, setSubjectImages] = useState<UploadedImage[]>([]);
   const [promptCount, setPromptCount] = useState<number>(3);
   const [aspectRatio, setAspectRatio] = useState<string>('1:1');
-  const [isPro, setIsPro] = useState<boolean>(false);
+  const [isPro, setIsPro] = useState<boolean>(true); // По умолчанию Pro для качества
   const [genMode, setGenMode] = useState<GenerationMode>(GenerationMode.MATCH_STYLE);
   const [customSceneText, setCustomSceneText] = useState<string>('');
   const [history, setHistory] = useState<PromptGroup[]>([]);
@@ -142,7 +142,7 @@ const App: React.FC = () => {
   };
 
   const handleImageUpload = async (newImages: UploadedImage[], setter: React.Dispatch<React.SetStateAction<UploadedImage[]>>) => {
-    setter(prev => [...prev, ...newImages].slice(0, 5));
+    setter(prev => [...prev, ...newImages].slice(0, 8)); // Увеличен лимит до 8
     for (const img of newImages) {
       setter(prev => prev.map(i => i.id === img.id ? { ...i, isUploading: true } : i));
       const url = await convertToPublicUrl(img);
@@ -154,7 +154,6 @@ const App: React.FC = () => {
     const isUploading = subjectImages.some(i => !i.publicUrl) || (genMode === GenerationMode.MATCH_STYLE && styleImages.some(i => !i.publicUrl));
     if (isUploading) { setError("Wait for images to finish uploading..."); return; }
     if (subjectImages.length === 0) { setError("Upload model photos."); return; }
-    if (genMode === GenerationMode.MATCH_STYLE && styleImages.length === 0) { setError("Upload style references."); return; }
     
     setError(null);
     setLoadingState(LoadingState.ANALYZING);
@@ -208,7 +207,7 @@ const App: React.FC = () => {
             </div>
             <div>
               <h1 className="text-lg font-black tracking-tighter text-white uppercase italic">Alchemist Studio</h1>
-              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none">Identity Engine v7.2</p>
+              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none">Pro Engine v7.5</p>
             </div>
           </div>
           <button onClick={() => setHistory([])} className="group flex items-center gap-2 px-5 py-2 rounded-full border border-white/5 hover:border-red-500/30 transition-all">
@@ -226,7 +225,15 @@ const App: React.FC = () => {
               <div className="flex items-center gap-3">
                 <div className="w-1.5 h-1.5 rounded-full bg-indigo-500"></div> Transmutation Config
               </div>
-              {isPro && <span className="text-[9px] bg-indigo-600 text-white px-2 py-0.5 rounded-full animate-pulse">PRO ACTIVE</span>}
+              <button 
+                onClick={() => setIsPro(!isPro)}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all ${
+                  isPro ? 'bg-indigo-600 border-indigo-400 text-white' : 'bg-[#161a27] border-white/5 text-slate-500'
+                }`}
+              >
+                <SparklesIcon className={`w-3.5 h-3.5 ${isPro ? 'animate-pulse' : ''}`} />
+                <span className="text-[9px] font-black uppercase">Banana Pro</span>
+              </button>
             </h2>
 
             <div className="space-y-10">
@@ -236,25 +243,13 @@ const App: React.FC = () => {
                 onImagesUpload={imgs => handleImageUpload(imgs, setSubjectImages)} 
                 onRemove={id => setSubjectImages(p => p.filter(i => i.id !== id))} 
                 icon={<UserIcon className="w-4 h-4 text-indigo-400" />} 
-                maxCount={5} 
+                maxCount={8} 
               />
 
               <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                    <GridIcon className="w-4 h-4" /> Mode & Frame
-                  </label>
-                  
-                  <button 
-                    onClick={() => setIsPro(!isPro)}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all ${
-                      isPro ? 'bg-indigo-600/20 border-indigo-500 text-indigo-400' : 'bg-[#161a27] border-white/5 text-slate-500'
-                    }`}
-                  >
-                    <SparklesIcon className={`w-3.5 h-3.5 ${isPro ? 'text-indigo-400 animate-pulse' : ''}`} />
-                    <span className="text-[9px] font-black uppercase">Pro Engine</span>
-                  </button>
-                </div>
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                  <GridIcon className="w-4 h-4" /> Mode & Aspect Ratio
+                </label>
                 
                 <div className="grid grid-cols-4 gap-2">
                   {[
@@ -266,7 +261,6 @@ const App: React.FC = () => {
                     <button 
                       key={m.id} 
                       onClick={() => setGenMode(m.id as GenerationMode)}
-                      title={m.label}
                       className={`aspect-square rounded-2xl border transition-all flex items-center justify-center ${
                         genMode === m.id 
                         ? 'bg-indigo-600 border-indigo-400 text-white shadow-xl shadow-indigo-600/20' 
@@ -310,7 +304,7 @@ const App: React.FC = () => {
                 <textarea 
                   value={customSceneText} 
                   onChange={e => setCustomSceneText(e.target.value)} 
-                  placeholder="Enter scene details..." 
+                  placeholder="Enter scene details (e.g. 'Walking in Paris at night')..." 
                   className="w-full h-32 bg-[#161a27] border border-white/5 rounded-2xl p-4 text-sm text-slate-200 outline-none focus:border-indigo-500/50 transition-colors resize-none" 
                 />
               )}
@@ -321,7 +315,7 @@ const App: React.FC = () => {
                   disabled={loadingState === LoadingState.ANALYZING} 
                   className="w-full py-5 rounded-[2rem] font-black bg-white text-black text-xs uppercase tracking-[0.2em] hover:bg-indigo-500 hover:text-white transition-all shadow-xl disabled:opacity-20 active:scale-95"
                 >
-                  {loadingState === LoadingState.ANALYZING ? 'Processing Intelligence...' : 'Generate Prompts'}
+                  {loadingState === LoadingState.ANALYZING ? 'Forging Prompts...' : 'Generate New Prompts'}
                 </button>
                 {error && <div className="p-3 bg-red-500/5 border border-red-500/20 rounded-2xl text-[10px] text-red-400 text-center font-bold uppercase tracking-widest">{error}</div>}
               </div>
@@ -357,9 +351,7 @@ const App: React.FC = () => {
                     <div className="flex-grow flex flex-col justify-between py-1">
                       <div className="space-y-4">
                         <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <h3 className="text-[11px] font-black text-indigo-500 uppercase tracking-[0.2em]">Synthesis Result 0{pi+1}</h3>
-                          </div>
+                          <h3 className="text-[11px] font-black text-indigo-500 uppercase tracking-[0.2em]">Synthesis Result 0{pi+1}</h3>
                           <div className="flex gap-2">
                             <button onClick={() => navigator.clipboard.writeText(p.text)} className="p-2.5 bg-white/5 hover:bg-white/10 text-slate-500 hover:text-white rounded-xl transition-all" title="Copy Prompt">
                               <CopyIcon className="w-4 h-4" />
@@ -371,7 +363,7 @@ const App: React.FC = () => {
                                 p.isGenerating ? 'bg-slate-800 text-slate-600 cursor-not-allowed' : 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20 hover:scale-105 active:scale-95'
                               }`}
                             >
-                              {p.isGenerating ? 'Rendering...' : 'Render Image'}
+                              {p.isGenerating ? 'Rendering...' : isPro ? 'Render Pro 1K' : 'Render Std'}
                             </button>
                           </div>
                         </div>
@@ -393,7 +385,7 @@ const App: React.FC = () => {
                               onClick={() => handleDownload(p.generatedImageUrl!, `alchemy-render-${Date.now()}.png`)}
                               className="px-6 py-3 bg-white text-black text-[10px] font-black uppercase rounded-full tracking-widest hover:scale-110 transition-transform flex items-center gap-2"
                             >
-                              <SparklesIcon className="w-4 h-4" /> Save to Device
+                              <SparklesIcon className="w-4 h-4" /> Save PNG
                             </button>
                           </div>
                         </div>
@@ -419,13 +411,6 @@ const App: React.FC = () => {
               </div>
             </div>
           ))}
-
-          {history.length === 0 && (
-            <div className="h-[600px] flex flex-col items-center justify-center text-slate-900 border-2 border-dashed border-white/5 rounded-[4rem]">
-              <SparklesIcon className="w-20 h-20 mb-8 opacity-5" />
-              <p className="text-sm font-black uppercase tracking-[0.5em] opacity-10">Studio Idle • Ready for Alchemy</p>
-            </div>
-          )}
         </div>
       </main>
     </div>

@@ -80,29 +80,30 @@ export const createTask = async (
   const apiKey = getApiKey();
   if (!apiKey) throw new Error("API KEY missing");
 
-  // Для Pro модели используем nano-banana-pro и специфичные поля
-  const payload: any = {
-    model: usePro ? "nano-banana-pro" : "google/nano-banana-edit",
-    input: usePro ? {
-      prompt,
-      aspect_ratio: aspectRatio,
-      resolution: "1K",
-      output_format: "png"
-      // Если Pro версия поддерживает лица, можно добавить image_urls: faceUrls
-    } : {
-      prompt,
-      image_urls: faceUrls,
-      output_format: "png",
-      image_size: aspectRatio
-    }
+  // В точности повторяем структуру из вашего рабочего лога
+  const inputPayload: any = {
+    prompt,
+    aspect_ratio: aspectRatio,
+    resolution: usePro ? "1K" : undefined,
+    image_urls: faceUrls,
+    output_format: "png"
   };
 
-  // Попробуем отправить лица в Pro тоже, если они есть
-  if (usePro && faceUrls.length > 0) {
-    payload.input.image_urls = faceUrls;
+  // Если не Pro, API может ожидать image_size вместо aspect_ratio
+  if (!usePro) {
+    inputPayload.image_size = aspectRatio;
+    delete inputPayload.aspect_ratio;
+    delete inputPayload.resolution;
   }
 
-  if (callbackUrl) payload.callBackUrl = callbackUrl;
+  const payload = {
+    model: usePro ? "nano-banana-pro" : "google/nano-banana-edit",
+    input: inputPayload
+  };
+
+  if (callbackUrl) {
+    (payload as any).callBackUrl = callbackUrl;
+  }
 
   const res = await fetch(CREATE_TASK_URL, {
     method: "POST",
