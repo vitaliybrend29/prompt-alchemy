@@ -20,40 +20,49 @@ export const generatePrompts = async (
 ): Promise<{ text: string; referenceImage?: string }[]> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  let systemInstruction = `You are a professional AI Prompt Engineer specializing in high-end fashion and lifestyle photography.
+  let systemInstruction = `You are a world-class AI Visual Architect and Reverse Prompt Engineer.
   
-  STYLE GUIDE (Follow this EXACTLY):
-  - Start with shot type and subject: "A full-body portrait of a beautiful woman..."
-  - Describe physical features based on photos: "long flowing hair, specific eye color, lip shape."
-  - Describe clothing in detail: "form-fitting athletic top, matching leggings, silk dress, etc."
-  - Describe the ENVIRONMENT/BACKGROUND: "modern bedroom with soft curtains, minimalist bed, luxury hotel lobby, etc."
-  - Describe LIGHTING: "brightly lit, clean natural light from a window, soft and airy atmosphere."
-  - End with technical keywords: "professional photography, 8k, highly detailed, masterwork."
+  CORE MISSION: 
+  Deconstruct the provided images to create hyper-realistic or stylistically perfect prompts.
   
-  TASK:
-  Generate prompts that act as a "Physical Passport" for the subject. Do not use generic terms like "the girl". Describe HER.
+  DETAILED ANALYSIS PROTOCOL:
+  1. IDENTITY: Analyze the subject's face precisely (eye shape, jawline, skin texture, hair flow). They are the "Constant".
+  2. LIGHTING: Identify light sources. Is it "volumetric fog", "high-key fashion lighting", "cinematic noir shadows", or "golden hour rim light"?
+  3. COLOR & MOOD: Extract the exact color palette (e.g., "muted earth tones", "vibrant neon cyberpunk cyan and magenta", "Kodak Portra 400 film aesthetics").
+  4. TEXTURE & MEDIUM: Is it digital art, a raw 35mm photo, oil on canvas, or 3D render? Look for "film grain", "sharp focus", "bokeh", or "brushstrokes".
+  
+  MODE SPECIFIC RULES:
+  - MATCH_STYLE: You must REVERSE ENGINEER the "Artistic Style Reference". Describe its DNA (lighting, texture, angle) and place the "Target Identity" subject into that exact world. Do NOT say "in the style of". Describe the visual elements that create that style.
+  - CHARACTER_SHEET: Focus on consistency. Front, side, and back views. High-detail clothing description.
+  
+  PROMPT STRUCTURE:
+  [Shot Type] of [Detailed Subject Description based on identity photos], [Detailed Clothing], [Environment Description], [Precise Lighting and Color Grading], [Camera/Technical Info: e.g., shot on 35mm, f/1.8, high resolution, masterpiece].
   
   Output MUST be valid JSON.`;
 
   const parts: any[] = [];
   
+  // Добавляем фото лица как основной ориентир
   if (subjectImages.length > 0) {
-    parts.push({ text: `REFERENCE SUBJECT PHOTOS:` });
+    parts.push({ text: `PRIMARY SUBJECT IDENTITY (The person to be generated):` });
     subjectImages.forEach(img => parts.push({ inlineData: { mimeType: img.mimeType, data: cleanBase64(img.base64) } }));
   }
 
   if (styleImages.length > 0 && mode === GenerationMode.MATCH_STYLE) {
-    parts.push({ text: `ARTISTIC STYLE REFERENCES:` });
+    parts.push({ text: `ARTISTIC STYLE REFERENCES (Deconstruct these perfectly):` });
     styleImages.forEach((img, idx) => {
-      parts.push({ text: `Style [${idx}]:` });
+      parts.push({ text: `Reference Style [${idx}]:` });
       parts.push({ inlineData: { mimeType: img.mimeType, data: cleanBase64(img.base64) } });
     });
     
-    parts.push({ text: `Create ${count} prompts for each style. Blend the subject's identity into these styles.` });
+    parts.push({ text: `Create ${count} highly accurate prompts. Synthesize the Subject's Identity with the exact visual DNA (lighting, grain, color, composition) of the Reference Style images.` });
   } 
   else {
-    parts.push({ text: `Generate ${count} highly descriptive prompts based on the subject's appearance.` });
+    parts.push({ text: `Generate ${count} cinematic prompts for the Subject.` });
     if (customText) parts.push({ text: `Scene Context: ${customText}` });
+    if (mode === GenerationMode.CHARACTER_SHEET) {
+      parts.push({ text: `Create a character reference sheet with multiple angles and outfit details.` });
+    }
   }
 
   try {
@@ -88,6 +97,7 @@ export const generatePrompts = async (
 
     parsed.results.forEach(res => {
       const idx = res.imageIndex || 0;
+      // Если есть картинка стиля, используем её как превью, иначе - лицо
       const refImg = (mode === GenerationMode.MATCH_STYLE && styleImages.length > 0)
         ? styleImages[idx]?.base64 || styleImages[0]?.base64 
         : subjectImages[0]?.base64;
