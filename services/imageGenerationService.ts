@@ -2,13 +2,17 @@
 const KIE_API_JOBS_BASE = "https://api.kie.ai/api/v1/jobs";
 const CREATE_TASK_URL = `${KIE_API_JOBS_BASE}/createTask`;
 
-const getApiKey = () => {
+const getApiKeyFromEnv = () => {
   const key = process.env.KIE_API_KEY || process.env.API_KEY;
   return (key && key !== 'undefined') ? key : null;
 };
 
-export const pollTaskStatus = async (taskId: string): Promise<string> => {
-  const apiKey = getApiKey();
+/**
+ * Опрашивает сервер о статусе задачи.
+ * @returns Массив ссылок на готовые изображения.
+ */
+export const monitorTaskProgress = async (taskId: string): Promise<string[]> => {
+  const apiKey = getApiKeyFromEnv();
   const maxAttempts = 120;
   let attempts = 0;
   const statusUrl = `${KIE_API_JOBS_BASE}/recordInfo?taskId=${taskId}`;
@@ -40,22 +44,18 @@ export const pollTaskStatus = async (taskId: string): Promise<string> => {
       const state = (result.state || "").toLowerCase();
       
       if (state === "success" || state === "completed") {
-        let foundUrl = "";
+        let urls: string[] = [];
         if (result.resultJson) {
           try {
-            const parsed = typeof result.resultJson === 'string' 
-              ? JSON.parse(result.resultJson) 
-              : result.resultJson;
-              
-            if (parsed.resultUrls && parsed.resultUrls[0]) {
-              foundUrl = parsed.resultUrls[0];
-            }
-          } catch (e) {
-            console.warn("Error parsing resultJson:", e);
-          }
+            const parsed = typeof result.resultJson === 'string' ? JSON.parse(result.resultJson) : result.resultJson;
+            if (parsed.resultUrls && Array.isArray(parsed.resultUrls)) urls = parsed.resultUrls;
+          } catch (e) { console.warn("Parsing resultJson failed:", e); }
         }
-        if (!foundUrl) foundUrl = result.imageUrl || result.resultUrl || (result.result?.resultUrls ? result.result.resultUrls[0] : "");
-        if (foundUrl) return foundUrl;
+        if (urls.length === 0) {
+          const singleUrl = result.imageUrl || result.resultUrl || (result.result?.resultUrls ? result.result.resultUrls[0] : "");
+          if (singleUrl) urls = [singleUrl];
+        }
+        if (urls.length > 0) return urls;
       }
 
       if (state === "fail" || state === "failed" || state === "error") {
@@ -70,45 +70,46 @@ export const pollTaskStatus = async (taskId: string): Promise<string> => {
   throw new Error("Polling timeout.");
 };
 
-export const createTask = async (
+/**
+ * Запускает создание изображения.
+ * @param resolution - Разрешение для Pro модели (1K, 2K, 4K)
+ */
+export const startImageGenerationTask = async (
   prompt: string, 
   faceUrls: string[], 
   aspectRatio: string = "1:1", 
-  usePro: boolean = false,
+  resolution: "Standard" | "1K" | "2K" | "4K" = "1K",
   callbackUrl?: string
 ): Promise<string> => {
-  const apiKey = getApiKey();
+  const apiKey = getApiKeyFromEnv();
   if (!apiKey) throw new Error("API KEY missing");
 
+  const isPro = resolution !== "Standard";
   let inputPayload: any;
 
-  if (usePro) {
-    // Формат для NANO-BANANA-PRO
+  if (isPro) {
     inputPayload = {
       prompt,
       aspect_ratio: aspectRatio,
-      resolution: "1K",
-      image_input: faceUrls, // Ключевое изменение: image_input для Pro
+      resolution: resolution, // Передаем 1K, 2K или 4K
+      image_input: faceUrls,
       output_format: "png"
     };
   } else {
-    // Формат для GOOGLE/NANO-BANANA-EDIT
     inputPayload = {
       prompt,
-      image_size: aspectRatio, // Обычная модель часто требует image_size
+      image_size: aspectRatio,
       image_urls: faceUrls,
       output_format: "png"
     };
   }
 
   const payload = {
-    model: usePro ? "nano-banana-pro" : "google/nano-banana-edit",
+    model: isPro ? "nano-banana-pro" : "google/nano-banana-edit",
     input: inputPayload
   };
 
-  if (callbackUrl) {
-    (payload as any).callBackUrl = callbackUrl;
-  }
+  if (callbackUrl) (payload as any).callBackUrl = callbackUrl;
 
   const res = await fetch(CREATE_TASK_URL, {
     method: "POST",

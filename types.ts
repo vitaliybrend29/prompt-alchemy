@@ -17,12 +17,13 @@ export enum GenerationMode {
 }
 
 export interface GeneratedPrompt {
+  id: string; // Уникальный ID для удаления
   text: string;
   referenceImage?: string;
   isGenerating?: boolean;
-  generatedImageUrl?: string;
+  generatedImageUrls?: string[]; // Изменено на массив
   error?: string;
-  taskId?: string; // ID задачи для восстановления
+  taskId?: string;
 }
 
 export interface PromptGroup {
